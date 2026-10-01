@@ -58,6 +58,71 @@ layout.happens('pointerMove', { x: 100, y: 0 });
 layout.happens('leftPointerUp', { x: 100, y: 0 }); // lays a segment
 ```
 
+## Placing stations
+
+`track-layout/station-placement` holds the station placement tools as
+state machines: island stations, single-spine platforms and dual-spine
+platform pairs. Like the editing tools, they need `@ue-too/being`.
+
+- **Previews.** Each engine draws its preview through an interface you
+  implement with your renderer: `StationPlacementPreview`,
+  `SingleSpinePlacementPreview` or `DualSpinePlacementPreview`.
+- **Commits** go to the managers. Draw new stations and platforms from
+  `StationManager.onStationAdded` and
+  `TrackAlignedPlatformManager.onPlatformAdded`, and remove them on
+  `onStationRemoved` and `onPlatformRemoved`.
+- **Hints.** The spine tools report each step through `onHint`, with keys
+  from `SINGLE_SPINE_HINT_KEYS` and `DUAL_SPINE_HINT_KEYS`.
+
+```ts
+import {
+    ELEVATION,
+    StationManager,
+    TrackAlignedPlatformManager,
+    TrackGraph,
+} from 'track-layout';
+import {
+    SingleSpinePlacementEngine,
+    type SingleSpinePlacementPreview,
+    createSingleSpinePlacementStateMachine,
+} from 'track-layout/station-placement';
+
+const graph = new TrackGraph();
+const stations = new StationManager();
+const platforms = new TrackAlignedPlatformManager();
+// Replace with your renderer's preview and your camera's conversion.
+const preview: SingleSpinePlacementPreview = {
+    showTrackHighlight() {},
+    showPlacementPreview() {},
+    hidePreview() {},
+};
+const windowToWorld = (p: { x: number; y: number }) => p;
+
+platforms.onPlatformAdded(id => console.log('draw', platforms.getPlatform(id)));
+
+const engine = new SingleSpinePlacementEngine(
+    graph,
+    windowToWorld,
+    stations,
+    platforms,
+    preview,
+    key => console.log(key) // e.g. 'hintPickStart'
+);
+const tool = createSingleSpinePlacementStateMachine(engine);
+const stationId = stations.createStation({
+    name: 'Central',
+    position: { x: 50, y: 10 },
+    elevation: ELEVATION.GROUND,
+    platforms: [],
+    trackSegments: [],
+    joints: [],
+    trackAlignedPlatforms: [],
+});
+tool.happens('startPlacement', { stationId });
+// Then pointerMove / leftPointerUp: pick the spine's start and end on a
+// track, add outer vertices, and click the start anchor to create it.
+```
+
 ## Development
 
 ```bash
