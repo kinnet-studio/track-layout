@@ -6,15 +6,16 @@
  * Usage:
  *   bun scripts/port-from-banana.ts <banana-root> <banana-file>=<track-layout-file> [...]
  *
- * Relative and `@/` specifiers that resolve to a module in MODULE_MAP are
- * rewritten. Package specifiers (e.g. `@ue-too/curve`) are left alone. Any
- * other specifier is left as-is and reported as UNMAPPED so it can be
+ * Relative and `@/` specifiers that resolve to a module in MODULE_MAP, and
+ * package specifiers listed in PACKAGE_MAP (`track-layout` itself), are
+ * rewritten. Other package specifiers (e.g. `@ue-too/curve`) are left alone.
+ * Any other specifier is left as-is and reported as UNMAPPED so it can be
  * handled by hand.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-import { MODULE_MAP } from './banana-module-map.js';
+import { MODULE_MAP, PACKAGE_MAP } from './banana-module-map.js';
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
 
@@ -40,6 +41,8 @@ function rewriteSpecifier(
         target = join(bananaRoot, 'src', specifier.slice(2));
     } else if (specifier.startsWith('.')) {
         target = resolve(dirname(sourceFile), specifier);
+    } else if (specifier in PACKAGE_MAP) {
+        return relativeSpecifier(destFile, PACKAGE_MAP[specifier]);
     } else {
         return specifier;
     }
@@ -52,8 +55,13 @@ function rewriteSpecifier(
         unmapped.push(specifier);
         return specifier;
     }
+    return relativeSpecifier(destFile, mapped);
+}
+
+/** A relative `.js` specifier from `destFile` to a repo module id. */
+function relativeSpecifier(destFile: string, moduleId: string): string {
     let rewritten = toPosix(
-        relative(dirname(destFile), join(REPO_ROOT, mapped))
+        relative(dirname(destFile), join(REPO_ROOT, moduleId))
     );
     if (!rewritten.startsWith('.')) {
         rewritten = `./${rewritten}`;

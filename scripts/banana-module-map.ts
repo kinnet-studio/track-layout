@@ -28,4 +28,35 @@ export const MODULE_MAP: Record<string, string> = {
     'src/stations/track-aligned-platform-types':
         'src/stations/track-aligned-platform-types',
     'src/stations/types': 'src/stations/types',
+    'src/trains/tracks/new-joint': 'src/editing/new-joint',
+    'src/trains/tracks/duplicate-geometry': 'src/editing/duplicate-geometry',
+    'src/trains/input-state-machine/types': 'src/editing/types',
+    'src/trains/input-state-machine/curve-engine': 'src/editing/curve-engine',
+    'src/trains/input-state-machine/layout-kmt-state-machine':
+        'src/editing/layout-kmt-state-machine',
+    'src/trains/input-state-machine/joint-direction-state-machine':
+        'src/editing/joint-direction-state-machine',
+    'src/trains/input-state-machine/duplicate-to-side-engine':
+        'src/editing/duplicate-to-side-engine',
+    'src/trains/input-state-machine/duplicate-to-side-state-machine':
+        'src/editing/duplicate-to-side-state-machine',
+    'src/trains/input-state-machine/catenary-layout-engine':
+        'src/editing/catenary-layout-engine',
+    'src/trains/input-state-machine/catenary-layout-state-machine':
+        'src/editing/catenary-layout-state-machine',
 };
+
+/**
+ * Package specifiers that banana files import, mapped to the track-layout
+ * module each one resolves to inside this repo.
+ */
+export const PACKAGE_MAP: Record<string, string> = {
+    'track-layout': 'src/index',
+};
+
+/** The package entry point that exposes a track-layout module. */
+export function entryPointFor(moduleId: string): string {
+    return moduleId.startsWith('src/editing/')
+        ? 'track-layout/editing'
+        : 'track-layout';
+}

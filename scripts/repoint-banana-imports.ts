@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
  * Rewrites imports in a banana checkout so that modules which moved to
- * track-layout are imported from the `track-layout` package instead.
+ * track-layout are imported from the package instead: `track-layout/editing`
+ * for modules under src/editing/, `track-layout` for everything else.
  *
  * Usage:
  *   bun scripts/repoint-banana-imports.ts <banana-root>
@@ -15,9 +16,8 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-import { MODULE_MAP } from './banana-module-map.js';
+import { MODULE_MAP, entryPointFor } from './banana-module-map.js';
 
-const PACKAGE_NAME = 'track-layout';
 const PARTIALLY_MOVED = 'src/utils';
 
 const STATEMENT_PATTERN =
@@ -93,7 +93,8 @@ function main(): void {
                 if (moduleId === null || !shouldRepoint(moduleId, clause)) {
                     return match;
                 }
-                return `${keyword}${space}${clause}${fromPart}${quote}${PACKAGE_NAME}${quote}`;
+                const entryPoint = entryPointFor(MODULE_MAP[moduleId]!);
+                return `${keyword}${space}${clause}${fromPart}${quote}${entryPoint}${quote}`;
             }
         );
         if (updated !== original) {
