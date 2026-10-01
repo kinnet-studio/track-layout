@@ -13,6 +13,12 @@ import {
 } from '@ue-too/math';
 
 import { LEVEL_HEIGHT } from './constants.js';
+import {
+    type SegmentStyle,
+    type SegmentStyleChange,
+    type SegmentStyleFields,
+    styleFieldsOf,
+} from './segment-style.js';
 import { TrackCurveManager } from './trackcurve-manager.js';
 import { TrackJointManager } from './trackjoint-manager.js';
 import {
@@ -174,11 +180,7 @@ export class TrackGraph {
         const secondCurve = new BCurve(newControlPointGroups[1]);
 
         const originalGauge = segment.gauge;
-        const originalBedWidth = segment.bedWidth;
-        const originalVisualProps =
-            this._trackCurveManager.getVisualPropsForSegment(
-                trackSegmentNumber
-            );
+        const originalStyle = styleFieldsOf(segment);
 
         this._trackCurveManager.destroyCurve(trackSegmentNumber);
 
@@ -191,8 +193,7 @@ export class TrackGraph {
                 newJoint.elevation,
                 originalGauge,
                 new Set(),
-                originalBedWidth,
-                originalVisualProps
+                originalStyle
             );
         const secondSegmentNumber =
             this._trackCurveManager.createCurveWithJoints(
@@ -203,8 +204,7 @@ export class TrackGraph {
                 t1Joint.elevation,
                 originalGauge,
                 new Set(),
-                originalBedWidth,
-                originalVisualProps
+                originalStyle
             );
 
         const tangentAtNewJoint = PointCal.unitVector(firstCurve.derivative(1));
@@ -350,11 +350,7 @@ export class TrackGraph {
         const secondCurve = new BCurve(newControlPointGroups[1]);
 
         const originalGauge = segment.gauge;
-        const originalBedWidth = segment.bedWidth;
-        const originalVisualProps =
-            this._trackCurveManager.getVisualPropsForSegment(
-                trackSegmentNumber
-            );
+        const originalStyle = styleFieldsOf(segment);
 
         this._trackCurveManager.destroyCurve(trackSegmentNumber);
 
@@ -367,8 +363,7 @@ export class TrackGraph {
                 newJoint.elevation,
                 originalGauge,
                 new Set(),
-                originalBedWidth,
-                originalVisualProps
+                originalStyle
             );
         const secondSegmentNumber =
             this._trackCurveManager.createCurveWithJoints(
@@ -379,8 +374,7 @@ export class TrackGraph {
                 t1Joint.elevation,
                 originalGauge,
                 new Set(),
-                originalBedWidth,
-                originalVisualProps
+                originalStyle
             );
 
         const tangentAtNewJoint = PointCal.unitVector(firstCurve.derivative(1));
@@ -1319,21 +1313,27 @@ export class TrackGraph {
         this._trackCurveManager.projectionBuffer = value;
     }
 
-    /** Total width of the gravel bed foundation for newly laid tracks (meters). Affects snapping. */
-    get bedWidth(): number {
-        return this._trackCurveManager.bedWidth;
+    /** Style applied to segments created from now on. */
+    get newSegmentStyle(): Readonly<SegmentStyle> {
+        return this._trackCurveManager.newSegmentStyle;
     }
 
-    set bedWidth(value: number) {
-        this._trackCurveManager.bedWidth = value;
+    /** Merges `style` into the style for new segments. */
+    setNewSegmentStyle(style: Partial<SegmentStyle>): void {
+        this._trackCurveManager.setNewSegmentStyle(style);
     }
 
-    get bedEnabled(): boolean {
-        return this._trackCurveManager.bedEnabled;
+    /** Changes an existing segment's style. Returns false for an unknown segment. */
+    setSegmentStyle(segmentNumber: number, patch: SegmentStyleFields): boolean {
+        return this._trackCurveManager.setSegmentStyle(segmentNumber, patch);
     }
 
-    set bedEnabled(value: boolean) {
-        this._trackCurveManager.bedEnabled = value;
+    /** Subscribe to style changes made with setSegmentStyle. */
+    onSegmentStyleChanged(
+        callback: (change: SegmentStyleChange) => void,
+        options?: SubscriptionOptions
+    ) {
+        return this._trackCurveManager.onSegmentStyleChanged(callback, options);
     }
 
     /**
@@ -1411,6 +1411,7 @@ export class TrackGraph {
                         electrified: segment.electrified,
                         catenarySide: segment.catenarySide,
                         bed: segment.bed,
+                        bedWidth: segment.bedWidth,
                     }
                 );
             }

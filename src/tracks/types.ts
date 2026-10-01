@@ -224,6 +224,8 @@ export type SerializedTrackSegment = {
     electrified?: boolean;
     catenarySide?: 1 | -1;
     bed?: boolean;
+    /** Bed width in metres; present on segments laid with a bed. */
+    bedWidth?: number;
 };
 
 export type SerializedTrackData = {
@@ -420,6 +422,15 @@ export function validateSerializedTrackData(
             return {
                 valid: false,
                 error: `${prefix}.splits must be a number[]`,
+            };
+        }
+        if (
+            s.bedWidth !== undefined &&
+            (typeof s.bedWidth !== 'number' || !(s.bedWidth > 0))
+        ) {
+            return {
+                valid: false,
+                error: `${prefix}.bedWidth must be a positive number`,
             };
         }
     }

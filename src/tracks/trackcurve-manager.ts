@@ -10,6 +10,15 @@ import { GenericEntityManager } from '../shared/entity-manager.js';
 import { RTree, Rectangle } from '../shared/r-tree.js';
 import { LEVEL_HEIGHT } from './constants.js';
 import {
+    DEFAULT_SEGMENT_STYLE,
+    type SegmentStyle,
+    type SegmentStyleChange,
+    type SegmentStyleFields,
+    segmentFieldsFromStyle,
+    styleFieldsOf,
+    withStyleDefaults,
+} from './segment-style.js';
+import {
     ELEVATION,
     ProjectionInfo,
     SerializedTrackSegment,
@@ -17,7 +26,6 @@ import {
     TrackSegmentSplit,
     TrackSegmentWithCollision,
     TrackSegmentWithCollisionAndNumber,
-    TrackStyle,
 } from './types.js';
 import {
     getElevationAtT,
@@ -77,6 +85,8 @@ export class TrackCurveManager {
     > = new SynchronousObservable<[number, TrackSegmentWithCollision]>();
     private _removeTrackSegmentObservable: Observable<[number]> =
         new SynchronousObservable<[number]>();
+    private _segmentStyleChangedObservable: Observable<[SegmentStyleChange]> =
+        new SynchronousObservable<[SegmentStyleChange]>();
 
     /**
      * Extra distance added to gauge-based projection thresholds.
@@ -84,10 +94,8 @@ export class TrackCurveManager {
      */
     private _projectionBuffer: number = 0.5;
 
-    /** Total width of the gravel bed foundation for newly created tracks. Used for snapping when bed is enabled. */
-    private _bedWidth: number = 3;
-    /** Whether the bed layer is enabled (affects snapping distance). */
-    private _bedEnabled: boolean = false;
+    /** Style applied to newly created segments. Its bed settings also size snapping for the track being laid. */
+    private _newSegmentStyle: SegmentStyle = { ...DEFAULT_SEGMENT_STYLE };
 
     constructor(initialCount: number) {
         this._internalTrackCurveManager = new GenericEntityManager<{
@@ -109,55 +117,73 @@ export class TrackCurveManager {
         this._projectionBuffer = Math.max(0, value);
     }
 
-    /** Get the current bed width for newly created tracks. */
-    get bedWidth(): number {
-        return this._bedWidth;
+    /** Style applied to segments created from now on. */
+    get newSegmentStyle(): Readonly<SegmentStyle> {
+        return this._newSegmentStyle;
     }
 
-    /** Set the bed width for newly created tracks (affects snapping). */
-    set bedWidth(value: number) {
-        this._bedWidth = Math.max(1, value);
+    /** Merges `style` into the style for new segments. The bed width is clamped to at least 1 m. */
+    setNewSegmentStyle(style: Partial<SegmentStyle>): void {
+        const next = { ...this._newSegmentStyle, ...style };
+        next.bedWidth = Math.max(1, next.bedWidth);
+        this._newSegmentStyle = next;
     }
 
-    /** Whether the bed layer is enabled for snapping. */
-    get bedEnabled(): boolean {
-        return this._bedEnabled;
+    /**
+     * Changes the style of an existing segment: the segment, its spatial-index
+     * entry and its draw data. Returns false when the segment does not exist.
+     */
+    setSegmentStyle(segmentNumber: number, patch: SegmentStyleFields): boolean {
+        const entity = this._internalTrackCurveManager.getEntity(segmentNumber);
+        if (entity === null) {
+            return false;
+        }
+        Object.assign(entity.segment, patch);
+        const treeEntry = this._treeEntryFor(
+            segmentNumber,
+            entity.segment.curve
+        );
+        if (treeEntry !== undefined) {
+            Object.assign(treeEntry, patch);
+        }
+        for (const drawData of this._persistedDrawData) {
+            if (
+                drawData.originalTrackSegment.trackSegmentNumber ===
+                segmentNumber
+            ) {
+                Object.assign(drawData, patch);
+            }
+        }
+        this._segmentStyleChangedObservable.notify({
+            segmentNumber,
+            style: styleFieldsOf(entity.segment),
+        });
+        return true;
     }
 
-    /** Toggle bed layer for snapping. When off, snapping uses gauge only. */
-    set bedEnabled(value: boolean) {
-        this._bedEnabled = value;
+    onSegmentStyleChanged(
+        callback: (change: SegmentStyleChange) => void,
+        options?: SubscriptionOptions
+    ) {
+        return this._segmentStyleChangedObservable.subscribe(callback, options);
+    }
+
+    private _treeEntryFor(
+        segmentNumber: number,
+        curve: BCurve
+    ): TrackSegmentWithCollisionAndNumber | undefined {
+        const aabb = curve.AABB;
+        return this._internalRTree
+            .search(
+                new Rectangle(aabb.min.x, aabb.min.y, aabb.max.x, aabb.max.y)
+            )
+            .find(entry => entry.trackSegmentNumber === segmentNumber);
     }
 
     get persistedDrawData(): (TrackSegmentDrawData & {
         callback(index: number): void;
     })[] {
         return this._persistedDrawData;
-    }
-
-    getVisualPropsForSegment(segmentNumber: number):
-        | {
-              trackStyle?: TrackStyle;
-              electrified?: boolean;
-              catenarySide?: 1 | -1;
-              bed?: boolean;
-              gauge?: number;
-              bedWidth?: number;
-          }
-        | undefined {
-        const drawData = this._persistedDrawData.find(
-            entry =>
-                entry.originalTrackSegment.trackSegmentNumber === segmentNumber
-        );
-        if (drawData === undefined) return undefined;
-        return {
-            trackStyle: drawData.trackStyle,
-            electrified: drawData.electrified,
-            catenarySide: drawData.catenarySide,
-            bed: drawData.bed,
-            gauge: drawData.gauge,
-            bedWidth: drawData.bedWidth,
-        };
     }
 
     getTrackSegment(segmentNumber: number): BCurve | null {
@@ -321,8 +347,8 @@ export class TrackCurveManager {
                 );
                 const existingWidth =
                     trackSegment.bedWidth ?? trackSegment.gauge;
-                const newWidth = this._bedEnabled
-                    ? this._bedWidth
+                const newWidth = this._newSegmentStyle.bed
+                    ? this._newSegmentStyle.bedWidth
                     : trackSegment.gauge;
                 const maxSnapDistance =
                     existingWidth / 2 + newWidth / 2 + this._projectionBuffer;
@@ -540,13 +566,10 @@ export class TrackCurveManager {
         t1Elevation: ELEVATION,
         gauge: number = 1.067,
         excludeSegmentsForCollisionCheck: Set<number> = new Set(),
-        bedWidth?: number,
-        visualProps?: {
-            trackStyle?: TrackStyle;
-            electrified?: boolean;
-            catenarySide?: 1 | -1;
-            bed?: boolean;
-        }
+        /** Style for the new segment; defaults to the new-segment style. Splits pass the parent's style. */
+        style: SegmentStyleFields = segmentFieldsFromStyle(
+            this._newSegmentStyle
+        )
     ): number {
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
@@ -726,12 +749,7 @@ export class TrackCurveManager {
             },
             collision: collisions,
             gauge,
-            bedWidth:
-                bedWidth ?? (this._bedEnabled ? this._bedWidth : undefined),
-            trackStyle: visualProps?.trackStyle,
-            electrified: visualProps?.electrified,
-            catenarySide: visualProps?.catenarySide,
-            bed: visualProps?.bed,
+            ...styleFieldsOf(style),
             splits: insertionT,
             splitCurves: splits,
         };
@@ -796,15 +814,10 @@ export class TrackCurveManager {
             console.warn('track segment not found');
             return;
         }
-        const rectangle = new Rectangle(
-            trackSegment.segment.curve.AABB.min.x,
-            trackSegment.segment.curve.AABB.min.y,
-            trackSegment.segment.curve.AABB.max.x,
-            trackSegment.segment.curve.AABB.max.y
+        const trackSegmentTreeEntry = this._treeEntryFor(
+            curveNumber,
+            trackSegment.segment.curve
         );
-        const trackSegmentTreeEntry = this._internalRTree
-            .search(rectangle)
-            .find(segment => segment.trackSegmentNumber === curveNumber);
         if (trackSegmentTreeEntry == null) {
             console.warn('track segment tree entry not found');
             return;
@@ -1023,6 +1036,7 @@ export class TrackCurveManager {
             },
             collision: collisions,
             gauge,
+            ...segmentFieldsFromStyle(this._newSegmentStyle),
             splits: insertionT,
             splitCurves: splits,
         };
@@ -1134,7 +1148,6 @@ export class TrackCurveManager {
         return this._internalTrackCurveManager
             .getLivingEntitiesWithIndex()
             .map(({ index, entity }) => {
-                const visualProps = this.getVisualPropsForSegment(index);
                 return {
                     segmentNumber: index,
                     controlPoints: entity.segment.curve
@@ -1148,14 +1161,11 @@ export class TrackCurveManager {
                     },
                     gauge: entity.segment.gauge,
                     splits: [...entity.segment.splits],
-                    trackStyle:
-                        entity.segment.trackStyle ?? visualProps?.trackStyle,
-                    electrified:
-                        entity.segment.electrified ?? visualProps?.electrified,
-                    catenarySide:
-                        entity.segment.catenarySide ??
-                        visualProps?.catenarySide,
-                    bed: entity.segment.bed ?? visualProps?.bed,
+                    trackStyle: entity.segment.trackStyle,
+                    electrified: entity.segment.electrified,
+                    catenarySide: entity.segment.catenarySide,
+                    bed: entity.segment.bed,
+                    bedWidth: entity.segment.bedWidth,
                 };
             });
     }
@@ -1174,12 +1184,8 @@ export class TrackCurveManager {
         t1Elevation: ELEVATION,
         gauge: number,
         splitTValues: number[],
-        visualProps?: {
-            trackStyle?: TrackStyle;
-            electrified?: boolean;
-            catenarySide?: 1 | -1;
-            bed?: boolean;
-        }
+        /** Saved style; missing fields get the defaults. */
+        style: SegmentStyleFields = {}
     ): void {
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
@@ -1311,10 +1317,7 @@ export class TrackCurveManager {
             },
             collision: collisions,
             gauge,
-            trackStyle: visualProps?.trackStyle,
-            electrified: visualProps?.electrified,
-            catenarySide: visualProps?.catenarySide,
-            bed: visualProps?.bed,
+            ...withStyleDefaults(style),
             splits: splitTValues,
             splitCurves: splits,
         };
@@ -1401,6 +1404,7 @@ export class TrackCurveManager {
                     electrified: segment.electrified,
                     catenarySide: segment.catenarySide,
                     bed: segment.bed,
+                    bedWidth: segment.bedWidth,
                 }
             );
         }

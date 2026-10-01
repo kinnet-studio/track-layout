@@ -1,0 +1,75 @@
+import type { TrackSegment, TrackStyle } from './types.js';
+
+/** Appearance applied to segments when they are created. */
+export type SegmentStyle = {
+    trackStyle: TrackStyle;
+    electrified: boolean;
+    /** Side of the catenary masts (1 = left, -1 = right of the curve direction). */
+    catenarySide?: 1 | -1;
+    bed: boolean;
+    /** Bed width in metres, applied to new segments while `bed` is on. */
+    bedWidth: number;
+};
+
+/** The style fields stored on each segment and saved with it. */
+export type SegmentStyleFields = Pick<
+    TrackSegment,
+    'trackStyle' | 'electrified' | 'catenarySide' | 'bed' | 'bedWidth'
+>;
+
+/** Payload of TrackGraph.onSegmentStyleChanged. */
+export type SegmentStyleChange = {
+    segmentNumber: number;
+    style: SegmentStyleFields;
+};
+
+export const DEFAULT_SEGMENT_STYLE: Readonly<SegmentStyle> = Object.freeze({
+    trackStyle: 'ballasted',
+    electrified: false,
+    bed: false,
+    bedWidth: 3,
+});
+
+/**
+ * The fields stored on a segment laid with `style`. The bed width is only
+ * stored while the bed is on, because snapping, parallel spacing and platform
+ * offsets treat a stored bed width as the track's footprint.
+ */
+export function segmentFieldsFromStyle(
+    style: SegmentStyle
+): SegmentStyleFields {
+    return {
+        trackStyle: style.trackStyle,
+        electrified: style.electrified,
+        catenarySide: style.catenarySide,
+        bed: style.bed,
+        bedWidth: style.bed ? style.bedWidth : undefined,
+    };
+}
+
+/** Fills style fields missing from a saved segment (older saves) with defaults. */
+export function withStyleDefaults(
+    saved: SegmentStyleFields
+): SegmentStyleFields {
+    const bed = saved.bed ?? DEFAULT_SEGMENT_STYLE.bed;
+    return {
+        trackStyle: saved.trackStyle ?? DEFAULT_SEGMENT_STYLE.trackStyle,
+        electrified: saved.electrified ?? DEFAULT_SEGMENT_STYLE.electrified,
+        catenarySide: saved.catenarySide,
+        bed,
+        bedWidth:
+            saved.bedWidth ??
+            (bed ? DEFAULT_SEGMENT_STYLE.bedWidth : undefined),
+    };
+}
+
+/** Copies just the style fields off a segment. */
+export function styleFieldsOf(segment: SegmentStyleFields): SegmentStyleFields {
+    return {
+        trackStyle: segment.trackStyle,
+        electrified: segment.electrified,
+        catenarySide: segment.catenarySide,
+        bed: segment.bed,
+        bedWidth: segment.bedWidth,
+    };
+}

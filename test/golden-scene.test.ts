@@ -20,10 +20,22 @@ function asSaved<T>(value: T): T {
 }
 
 describe('golden banana scene (b26692b)', () => {
-    it('reloads and re-saves the tracks unchanged', async () => {
+    it('reloads the tracks, filling in style defaults', async () => {
         const graph = new TrackGraph();
         await graph.loadFromSerializedData(fixture.tracks);
-        expect(asSaved(graph.serialize())).toEqual(fixture.tracks);
+
+        // b26692b saves omit style on unstyled segments and never include
+        // bedWidth. Loading fills both in (bedWidth only where bed is on).
+        const expected = structuredClone(fixture.tracks);
+        for (const segment of expected.segments) {
+            segment.trackStyle ??= 'ballasted';
+            segment.electrified ??= false;
+            segment.bed ??= false;
+            if (segment.bed) {
+                segment.bedWidth ??= 3;
+            }
+        }
+        expect(asSaved(graph.serialize())).toEqual(expected);
     });
 
     it('reloads and re-saves the stations unchanged', () => {
