@@ -14,6 +14,7 @@ import {
     type SegmentStyle,
     type SegmentStyleChange,
     type SegmentStyleFields,
+    applyStylePatch,
     segmentFieldsFromStyle,
     styleFieldsOf,
     withStyleDefaults,
@@ -138,25 +139,26 @@ export class TrackCurveManager {
         if (entity === null) {
             return false;
         }
-        Object.assign(entity.segment, patch);
+        const style = applyStylePatch(entity.segment, patch);
+        Object.assign(entity.segment, style);
         const treeEntry = this._treeEntryFor(
             segmentNumber,
             entity.segment.curve
         );
         if (treeEntry !== undefined) {
-            Object.assign(treeEntry, patch);
+            Object.assign(treeEntry, style);
         }
         for (const drawData of this._persistedDrawData) {
             if (
                 drawData.originalTrackSegment.trackSegmentNumber ===
                 segmentNumber
             ) {
-                Object.assign(drawData, patch);
+                Object.assign(drawData, style);
             }
         }
         this._segmentStyleChangedObservable.notify({
             segmentNumber,
-            style: styleFieldsOf(entity.segment),
+            style,
         });
         return true;
     }

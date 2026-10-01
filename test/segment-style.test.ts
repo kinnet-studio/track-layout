@@ -175,6 +175,44 @@ describe('TrackGraph.setSegmentStyle', () => {
         }
     });
 
+    it('clears bedWidth when the bed is turned off', () => {
+        const graph = new TrackGraph();
+        const segment = layStraight(graph);
+        graph.setSegmentStyle(segment, { bed: true, bedWidth: 4 });
+        graph.setSegmentStyle(segment, { bed: false });
+
+        expect(styleOf(graph, segment)).toMatchObject({
+            bed: false,
+            bedWidth: undefined,
+        });
+        const saved = JSON.parse(JSON.stringify(graph.serialize()));
+        expect(saved.segments[0].bed).toBe(false);
+        expect(saved.segments[0].bedWidth).toBeUndefined();
+    });
+
+    it('stores the default bedWidth when the bed is turned on without one', () => {
+        const graph = new TrackGraph();
+        const segment = layStraight(graph);
+        graph.setSegmentStyle(segment, { bed: true });
+        expect(styleOf(graph, segment)).toMatchObject({
+            bed: true,
+            bedWidth: 3,
+        });
+    });
+
+    it('changes only style fields from a patch with other properties', () => {
+        const graph = new TrackGraph();
+        const segment = layStraight(graph);
+        const gauge = graph.getTrackSegmentWithJoints(segment)!.gauge;
+        graph.setSegmentStyle(segment, {
+            trackStyle: 'slab',
+            gauge: 9,
+        } as never);
+        const after = graph.getTrackSegmentWithJoints(segment)!;
+        expect(after.trackStyle).toBe('slab');
+        expect(after.gauge).toBe(gauge);
+    });
+
     it('returns false and stays silent for an unknown segment', () => {
         const graph = new TrackGraph();
         let changes = 0;

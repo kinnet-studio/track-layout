@@ -73,3 +73,33 @@ export function styleFieldsOf(segment: SegmentStyleFields): SegmentStyleFields {
         bedWidth: segment.bedWidth,
     };
 }
+
+const STYLE_KEYS = [
+    'trackStyle',
+    'electrified',
+    'catenarySide',
+    'bed',
+    'bedWidth',
+] as const;
+
+/**
+ * Merges the style keys present in `patch` over `current` and keeps the bed
+ * width in step with the bed: no bed means no stored width, a bed means a
+ * width of at least 1 m (default 3 m when none was given). Other properties of
+ * `patch` are ignored.
+ */
+export function applyStylePatch(
+    current: SegmentStyleFields,
+    patch: SegmentStyleFields
+): SegmentStyleFields {
+    const merged: SegmentStyleFields = { ...styleFieldsOf(current) };
+    for (const key of STYLE_KEYS) {
+        if (key in patch) {
+            (merged as Record<string, unknown>)[key] = patch[key];
+        }
+    }
+    merged.bedWidth = merged.bed
+        ? Math.max(1, merged.bedWidth ?? DEFAULT_SEGMENT_STYLE.bedWidth)
+        : undefined;
+    return merged;
+}
