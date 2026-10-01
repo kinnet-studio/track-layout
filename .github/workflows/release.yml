@@ -34,7 +34,7 @@ jobs:
               run: |
                   echo "Release from main or a version/* branch; other branches can only do a dry run."
                   exit 1
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
               with:
                   token: ${{ secrets.PAT || github.token }}
                   # Full history and tags: the auto bump reads the commits
@@ -43,7 +43,7 @@ jobs:
             - uses: oven-sh/setup-bun@v2
               with:
                   bun-version: 1.3.13
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v5
               with:
                   node-version: '22.19.0'
                   registry-url: 'https://registry.npmjs.org'
