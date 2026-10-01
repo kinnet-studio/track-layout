@@ -70,7 +70,10 @@ platform pairs. Like the editing tools, they need `@ue-too/being`.
 - **Commits** go to the managers. Draw new stations and platforms from
   `StationManager.onStationAdded` and
   `TrackAlignedPlatformManager.onPlatformAdded`, and remove them on
-  `onStationRemoved` and `onPlatformRemoved`.
+  `onStationRemoved` and `onPlatformRemoved`. The spine tools also link
+  each new platform to its station, and move a station onto its first
+  platform; `TrackAlignedPlatformManager.onChange` signals that, not a
+  `StationManager` event.
 - **Hints.** The spine tools report each step through `onHint`, with keys
   from `SINGLE_SPINE_HINT_KEYS` and `DUAL_SPINE_HINT_KEYS`.
 
