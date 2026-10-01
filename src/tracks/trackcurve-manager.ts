@@ -125,8 +125,15 @@ export class TrackCurveManager {
 
     /** Merges `style` into the style for new segments. The bed width is clamped to at least 1 m. */
     setNewSegmentStyle(style: Partial<SegmentStyle>): void {
-        const next = { ...this._newSegmentStyle, ...style };
-        next.bedWidth = Math.max(1, next.bedWidth);
+        const next: SegmentStyle = { ...this._newSegmentStyle };
+        for (const key of Object.keys(style) as (keyof SegmentStyle)[]) {
+            if (style[key] !== undefined || key === 'catenarySide') {
+                (next as Record<string, unknown>)[key] = style[key];
+            }
+        }
+        next.bedWidth = Number.isFinite(next.bedWidth)
+            ? Math.max(1, next.bedWidth)
+            : DEFAULT_SEGMENT_STYLE.bedWidth;
         this._newSegmentStyle = next;
     }
 

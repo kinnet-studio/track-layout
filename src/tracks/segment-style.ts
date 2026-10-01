@@ -98,8 +98,11 @@ export function applyStylePatch(
             (merged as Record<string, unknown>)[key] = patch[key];
         }
     }
+    const width = merged.bedWidth;
     merged.bedWidth = merged.bed
-        ? Math.max(1, merged.bedWidth ?? DEFAULT_SEGMENT_STYLE.bedWidth)
+        ? width !== undefined && Number.isFinite(width)
+            ? Math.max(1, width)
+            : DEFAULT_SEGMENT_STYLE.bedWidth
         : undefined;
     return merged;
 }

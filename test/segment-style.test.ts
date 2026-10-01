@@ -354,3 +354,39 @@ describe('validateSerializedTrackData bedWidth', () => {
         }
     });
 });
+
+describe('non-finite bedWidth', () => {
+    it('falls back to the default when new-segment bedWidth is NaN', () => {
+        const graph = new TrackGraph();
+        graph.setNewSegmentStyle({ bedWidth: NaN });
+        expect(graph.newSegmentStyle.bedWidth).toBe(3);
+    });
+
+    it('keeps the previous new-segment bedWidth for an explicit undefined', () => {
+        const graph = new TrackGraph();
+        graph.setNewSegmentStyle({ bedWidth: 5 });
+        graph.setNewSegmentStyle({ bedWidth: undefined });
+        expect(graph.newSegmentStyle.bedWidth).toBe(5);
+    });
+
+    it('keeps trackStyle for an explicit undefined', () => {
+        const graph = new TrackGraph();
+        graph.setNewSegmentStyle({ trackStyle: 'slab' });
+        graph.setNewSegmentStyle({ trackStyle: undefined });
+        expect(graph.newSegmentStyle.trackStyle).toBe('slab');
+    });
+
+    it('stores the default bedWidth for NaN and still saves validly', () => {
+        const graph = new TrackGraph();
+        const segment = layStraight(graph);
+        expect(
+            graph.setSegmentStyle(segment, {
+                bed: true,
+                bedWidth: NaN,
+            } as SegmentStyleFields)
+        ).toBe(true);
+        expect(styleOf(graph, segment).bedWidth).toBe(3);
+        const saved = JSON.parse(JSON.stringify(graph.serialize()));
+        expect(validateSerializedTrackData(saved)).toEqual({ valid: true });
+    });
+});
