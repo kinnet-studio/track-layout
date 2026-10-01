@@ -32,6 +32,32 @@ graph.connectJoints(a, b, [{ x: 50, y: 0 }], 1.067);
 const saved = JSON.stringify(graph.serialize());
 ```
 
+## Laying and editing track
+
+`track-layout/editing` holds the laying engine and the editing tools as
+state machines: layout, joint direction, duplicate to side and catenary.
+They need the optional peer `@ue-too/being`.
+
+```ts
+import { TrackGraph } from 'track-layout';
+import {
+    CurveCreationEngine,
+    createLayoutStateMachine,
+} from 'track-layout/editing';
+
+const graph = new TrackGraph();
+// Replace with your camera's window-to-world conversion.
+const windowToWorld = (p: { x: number; y: number }) => p;
+const engine = new CurveCreationEngine(graph, windowToWorld);
+const layout = createLayoutStateMachine(engine);
+
+layout.happens('startLayout');
+layout.happens('pointerMove', { x: 0, y: 0 });
+layout.happens('leftPointerUp', { x: 0, y: 0 });
+layout.happens('pointerMove', { x: 100, y: 0 });
+layout.happens('leftPointerUp', { x: 100, y: 0 }); // lays a segment
+```
+
 ## Development
 
 ```bash

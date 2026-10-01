@@ -13,6 +13,11 @@
             "import": "./dist/index.js",
             "default": "./dist/index.js"
         },
+        "./editing": {
+            "types": "./dist/editing/index.d.ts",
+            "import": "./dist/editing/index.js",
+            "default": "./dist/editing/index.js"
+        },
         "./package.json": "./package.json"
     },
     "files": ["dist"],
@@ -26,9 +31,15 @@
         "prepublishOnly": "bun run typecheck && bun test && bun run build"
     },
     "peerDependencies": {
+        "@ue-too/being": "^0.19.0",
         "@ue-too/board": "^0.19.0",
         "@ue-too/curve": "^0.19.0",
         "@ue-too/math": "^0.19.0"
+    },
+    "peerDependenciesMeta": {
+        "@ue-too/being": {
+            "optional": true
+        }
     },
     "devDependencies": {
         "@trivago/prettier-plugin-sort-imports": "^5.2.0",
