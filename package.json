@@ -22,6 +22,11 @@
             "import": "./dist/editing/index.js",
             "default": "./dist/editing/index.js"
         },
+        "./station-placement": {
+            "types": "./dist/station-placement/index.d.ts",
+            "import": "./dist/station-placement/index.js",
+            "default": "./dist/station-placement/index.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [

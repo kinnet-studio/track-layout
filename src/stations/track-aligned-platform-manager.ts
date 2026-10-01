@@ -24,6 +24,10 @@ import type { TrackDirection } from './types.js';
 export class TrackAlignedPlatformManager {
     private _manager: GenericEntityManager<TrackAlignedPlatform>;
     private _changeObservable: Observable<[]> = new SynchronousObservable<[]>();
+    private _platformAddedObservable: Observable<[number]> =
+        new SynchronousObservable<[number]>();
+    private _platformRemovedObservable: Observable<[number]> =
+        new SynchronousObservable<[number]>();
     private _onBeforeDestroy:
         ((id: number, platform: TrackAlignedPlatform) => void) | null = null;
 
@@ -49,6 +53,35 @@ export class TrackAlignedPlatformManager {
         return this._changeObservable.subscribe(callback, options);
     }
 
+    /**
+     * Subscribe to a platform being created, by `createPlatform` or
+     * `createPlatformWithId`. Fires before `onChange`.
+     *
+     * The placement tools link a new platform to its station only after
+     * creating it, so while this fires the station's `trackAlignedPlatforms`
+     * doesn't list it yet. Listen to `onChange`, which they fire again once
+     * the link is set, if you need it.
+     */
+    onPlatformAdded(
+        callback: (id: number) => void,
+        options?: SubscriptionOptions
+    ): () => void {
+        return this._platformAddedObservable.subscribe(callback, options);
+    }
+
+    /**
+     * Subscribe to a platform being destroyed, by `destroyPlatform` or once per
+     * platform by `destroyPlatformsForStation`. Fires after the before-destroy
+     * hook and the entity's removal, before `onChange`, and only for a
+     * platform that existed.
+     */
+    onPlatformRemoved(
+        callback: (id: number) => void,
+        options?: SubscriptionOptions
+    ): () => void {
+        return this._platformRemovedObservable.subscribe(callback, options);
+    }
+
     // -----------------------------------------------------------------------
     // CRUD
     // -----------------------------------------------------------------------
@@ -61,6 +94,7 @@ export class TrackAlignedPlatformManager {
             ...platform,
             id,
         } as TrackAlignedPlatform);
+        this._platformAddedObservable.notify(id);
         this._changeObservable.notify();
     }
 
@@ -77,6 +111,7 @@ export class TrackAlignedPlatformManager {
         } as TrackAlignedPlatform);
         const entity = this._manager.getEntity(id);
         if (entity) entity.id = id;
+        this._platformAddedObservable.notify(id);
         this._changeObservable.notify();
         return id;
     }
@@ -91,6 +126,7 @@ export class TrackAlignedPlatformManager {
             this._onBeforeDestroy(id, platform);
         }
         this._manager.destroyEntity(id);
+        if (platform) this._platformRemovedObservable.notify(id);
         this._changeObservable.notify();
     }
 
@@ -100,10 +136,12 @@ export class TrackAlignedPlatformManager {
             .filter(({ entity }) => entity.stationId === stationId)
             .map(({ index, entity }) => ({ index, entity }));
         for (const { index, entity } of toDestroy) {
+            if (this._manager.getEntity(index) === null) continue;
             if (this._onBeforeDestroy) {
                 this._onBeforeDestroy(index, entity);
             }
             this._manager.destroyEntity(index);
+            this._platformRemovedObservable.notify(index);
         }
         if (toDestroy.length > 0) this._changeObservable.notify();
     }

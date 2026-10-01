@@ -1,4 +1,8 @@
-import { SynchronousObservable } from '@ue-too/board';
+import {
+    Observable,
+    type SubscriptionOptions,
+    SynchronousObservable,
+} from '@ue-too/board';
 
 import { GenericEntityManager } from '../shared/entity-manager.js';
 import { nextStopPositionId } from './stop-position-utils.js';
@@ -14,6 +18,10 @@ export class StationManager {
     private _onDestroyStation: ((id: number) => void) | null = null;
     private _changeObservable: SynchronousObservable<[]> =
         new SynchronousObservable<[]>();
+    private _stationAddedObservable: Observable<[number]> =
+        new SynchronousObservable<[number]>();
+    private _stationRemovedObservable: Observable<[number]> =
+        new SynchronousObservable<[number]>();
 
     constructor(initialCount = 10) {
         this._manager = new GenericEntityManager<Station>(initialCount);
@@ -22,6 +30,29 @@ export class StationManager {
     /** Subscribe to notifications when stations or stop positions are mutated. */
     onChange(callback: () => void): () => void {
         return this._changeObservable.subscribe(callback);
+    }
+
+    /**
+     * Subscribe to a station being created, by `createStation` or
+     * `createStationWithId`. Fires before `onChange`.
+     */
+    onStationAdded(
+        callback: (id: number) => void,
+        options?: SubscriptionOptions
+    ): () => void {
+        return this._stationAddedObservable.subscribe(callback, options);
+    }
+
+    /**
+     * Subscribe to a station being destroyed. Fires after the before-destroy
+     * hook and the entity's removal, before `onChange`, and only for a
+     * station that existed.
+     */
+    onStationRemoved(
+        callback: (id: number) => void,
+        options?: SubscriptionOptions
+    ): () => void {
+        return this._stationRemovedObservable.subscribe(callback, options);
     }
 
     private _notifyChanged(): void {
@@ -44,6 +75,7 @@ export class StationManager {
         // Patch the id to match the entity number assigned by the manager.
         const entity = this._manager.getEntity(id);
         if (entity) entity.id = id;
+        this._stationAddedObservable.notify(id);
         this._notifyChanged();
         return id;
     }
@@ -60,12 +92,15 @@ export class StationManager {
 
     createStationWithId(id: number, station: Station): void {
         this._manager.createEntityWithId(id, { ...station, id });
+        this._stationAddedObservable.notify(id);
         this._notifyChanged();
     }
 
     destroyStation(id: number): void {
+        const existed = this._manager.getEntity(id) !== null;
         this._onDestroyStation?.(id);
         this._manager.destroyEntity(id);
+        if (existed) this._stationRemovedObservable.notify(id);
         this._notifyChanged();
     }
 
