@@ -58,6 +58,8 @@ describe('PreviewCurveCalculator curve type', () => {
             brandNew(100, 50)
         );
         expect(cps).toHaveLength(3);
+        // The control point lies along the start tangent.
+        expect(cps[1].y).toBeCloseTo(0);
     });
 
     it('uses a reversed quadratic from a brand-new start to a constrained end', () => {
@@ -66,6 +68,8 @@ describe('PreviewCurveCalculator curve type', () => {
             extending(100, 0, EAST)
         );
         expect(cps).toHaveLength(3);
+        // The control point lies on the end joint's tangent line.
+        expect(cps[1].y).toBeCloseTo(0);
     });
 
     it('uses a cubic between two constrained joints', () => {
@@ -77,15 +81,30 @@ describe('PreviewCurveCalculator curve type', () => {
     });
 
     it('draws a straight line from a constrained start when straight-line mode is on', () => {
-        const calculator = new PreviewCurveCalculator();
-        calculator.toggleStraightLine();
-        const { cps } = calculator.getPreviewCurve(
+        const cross = (cps: Point[]) => {
+            const first = cps[0];
+            const last = cps[cps.length - 1];
+            const mid = cps[1];
+            return (
+                (last.x - first.x) * (mid.y - first.y) -
+                (last.y - first.y) * (mid.x - first.x)
+            );
+        };
+
+        const straight = new PreviewCurveCalculator();
+        straight.toggleStraightLine();
+        const { cps } = straight.getPreviewCurve(
             extending(0, 0, EAST),
-            brandNew(100, 0)
+            brandNew(100, 50)
         );
-        for (const point of cps) {
-            expect(point.y).toBeCloseTo(0);
-        }
+        expect(cross(cps)).toBeCloseTo(0);
+
+        // Without the toggle the same call bends along the start tangent.
+        const { cps: bent } = new PreviewCurveCalculator().getPreviewCurve(
+            extending(0, 0, EAST),
+            brandNew(100, 50)
+        );
+        expect(Math.abs(cross(bent))).toBeGreaterThan(1);
     });
 });
 

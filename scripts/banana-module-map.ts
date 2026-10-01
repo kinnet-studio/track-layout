@@ -52,6 +52,7 @@ export const MODULE_MAP: Record<string, string> = {
  */
 export const PACKAGE_MAP: Record<string, string> = {
     'track-layout': 'src/index',
+    'track-layout/editing': 'src/editing/index',
 };
 
 /** The package entry point that exposes a track-layout module. */

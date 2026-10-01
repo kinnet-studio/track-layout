@@ -31,7 +31,7 @@ describe('layout state machine with a curve engine', () => {
         const graph = new TrackGraph();
         const engine = new CurveCreationEngine(graph, identity);
         const machine = createLayoutStateMachine(engine);
-        return { graph, machine };
+        return { graph, engine, machine };
     }
 
     it('lays chained segments click by click', () => {
@@ -93,6 +93,38 @@ describe('layout state machine with a curve engine', () => {
 
         machine.happens('endDeletion');
         expect(machine.currentState).toBe('HOVER_FOR_STARTING_POINT');
+    });
+});
+
+describe('layout state machine curve-shape keys', () => {
+    it('Q straightens the preview, a second Q and G/F change it again', () => {
+        const graph = new TrackGraph();
+        const engine = new CurveCreationEngine(graph, identity);
+        const machine = createLayoutStateMachine(engine);
+        const cps = () => engine.previewCurve!.curve.getControlPoints();
+        const cross = (p: Point[]) =>
+            (p[p.length - 1].x - p[0].x) * (p[1].y - p[0].y) -
+            (p[p.length - 1].y - p[0].y) * (p[1].x - p[0].x);
+
+        machine.happens('startLayout');
+        machine.happens('pointerMove', { x: 0, y: 0 });
+        machine.happens('leftPointerUp', { x: 0, y: 0 });
+        machine.happens('pointerMove', { x: 100, y: 0 });
+        machine.happens('leftPointerUp', { x: 100, y: 0 });
+        machine.happens('pointerMove', { x: 200, y: 50 });
+        expect(engine.previewCurve).toBeDefined();
+        const before = cps().map(p => ({ x: p.x, y: p.y }));
+        expect(Math.abs(cross(cps()))).toBeGreaterThan(1);
+
+        machine.happens('Q');
+        const straight = cps().map(p => ({ x: p.x, y: p.y }));
+        expect(cross(cps())).toBeCloseTo(0);
+        expect(straight).not.toEqual(before);
+
+        machine.happens('Q');
+        machine.happens('G');
+        const after = cps().map(p => ({ x: p.x, y: p.y }));
+        expect(after).not.toEqual(before);
     });
 });
 
