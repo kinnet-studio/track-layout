@@ -52,7 +52,7 @@ All destinations are under `track-layout/src/editing/`.
 | `src/trains/input-state-machine/duplicate-to-side-state-machine.ts` | `duplicate-to-side-state-machine.ts` |
 | `src/trains/input-state-machine/catenary-layout-engine.ts` | `catenary-layout-engine.ts` |
 | `src/trains/input-state-machine/catenary-layout-state-machine.ts` | `catenary-layout-state-machine.ts` |
-| `createLayoutStateMachine` from `src/trains/input-state-machine/utils/factory.ts` | added to `layout-kmt-state-machine.ts`, next to the states, as the other machines' factories are |
+| `createLayoutStateMachine` from `src/trains/input-state-machine/utils/factory.ts` | added to `layout-kmt-state-machine.ts`, next to the states, as the other machines' factories are. It takes any `LayoutContext`, which the engine implements. |
 
 - The ten files import only each other, `track-layout` (the model) and `@ue-too/*`.
 - Inside the package, model imports point at the package's own modules (`'../index.js'`), not at `'track-layout'`.
@@ -75,7 +75,7 @@ All destinations are under `track-layout/src/editing/`.
      - `convert2WorldPosition(p)` stays, because `LayoutContext` needs it, but it now delegates to the injected function.
    - The `trackGraph` getter is removed. Banana's `init-app`:
      - creates the `TrackGraph`
-     - builds a `windowToWorld(canvas, camera)` helper, which is the code that leaves the engine
+     - builds a `windowToWorld` converter with a new `createWindowToWorld(canvas, camera)` helper in `src/utils/window-to-world.ts`. The helper is the code that leaves the engine; it reads the canvas and camera on every call, and has its own tests.
      - passes both to the engine
      - passes the same helper to the duplicate-to-side and catenary engines and to the joint-direction context
      - exposes the graph as `app.trackGraph` (`BananaAppComponents.trackGraph`)
@@ -105,7 +105,13 @@ Everything else in the engine's API is unchanged:
 
 ### In track-layout
 
-Order: port verbatim, then change 1 (the minimum needed to build an engine in a test), then characterization tests, then changes 2–5, each with its own tests.
+Order:
+1. Port, together with change 3. The package's typecheck must stay clean, and the verbatim joint-direction factory doesn't typecheck.
+2. Changes 1 and 2, together. Once the canvas and camera are gone, `convert2WindowPosition` can't be implemented, and `LayoutContext` requires it. This is also the minimum needed to build an engine in a test.
+3. Characterization tests.
+4. Changes 4 and 5, each with its own tests.
+
+Prototyping every step against banana `92ca5a3` gave 320 passing tests in `track-layout` (28 files) and a clean typecheck.
 
 - **Ported:** `duplicate-geometry.test.ts` (5 tests).
 - **Preview-curve calculator:**
@@ -122,7 +128,7 @@ Order: port verbatim, then change 1 (the minimum needed to build an engine in a 
     - branching off the middle of a protected segment, with no orphaned joint
   - **Deletion:** hovering highlights a segment, and deleting removes it.
   - **Observables:** preview draw data fires while hovering and clears on cancel; projections fire.
-- **State machines**, each driven through a fake context that records calls:
+- **State machines**: the layout, duplicate-to-side and catenary machines run on their real engines and a real graph. The joint-direction machine, whose context banana implements with its renderer and preference map, runs against a fake context that records calls:
   - layout: idle → hover for start → hover for end → commit and chain → failure path → escape → deletion mode
   - joint direction: hover, select, cycle
   - duplicate-to-side and catenary: their commit paths
@@ -131,7 +137,7 @@ Order: port verbatim, then change 1 (the minimum needed to build an engine in a 
 ### In banana
 
 On branch `feat/track-layout-phase-2`, using the 0.2.0 tarball:
-- `bun test` gives 729 passing tests: 734 minus `duplicate-geometry.test.ts`'s 5.
+- `bun test` gives 732 passing tests: 734, minus `duplicate-geometry.test.ts`'s 5, plus 3 tests for the new window-to-world helper.
 - `tsc` shows 9 errors: the previous 11 minus the 2 in `joint-direction-state-machine.ts`, which moves away.
 - The build and format check are clean.
 
@@ -147,7 +153,7 @@ On branch `feat/track-layout-phase-2`, using the 0.2.0 tarball:
 ## Banana's side
 
 1. Branch `feat/track-layout-phase-2` from `main`.
-2. Install the 0.2.0 tarball (`bun run pack:local` in `track-layout`, `bun add` in banana).
+2. Install the 0.2.0 tarball: `bun run pack:local` in `track-layout`, then point banana's `track-layout` dependency at `../../track/main/.pack/track-layout-local.tgz` in `package.json` and run `bun install`. `bun add <tarball>` fails with an internal Bun error (`DependencyLoop`) while banana already depends on the registry version.
 3. Delete:
    - the 10 moved files
    - `input-state-machine/utils/`
@@ -156,7 +162,7 @@ On branch `feat/track-layout-phase-2`, using the 0.2.0 tarball:
    - Barrel imports are fixed by hand, as in phase 1. `render-system.ts` imports `CurveCreationEngine` from `'../input-state-machine'`. The tool switcher imports `CurveCreationEngine` and `createLayoutStateMachine` from `'.'`, together with `TrainPlacementStateMachine`.
    - `input-state-machine/index.ts` keeps only its banana exports.
 5. Apply changes 1 and 3 in `init-app`, and switch `curveEngine.trackGraph` to `trackGraph`.
-6. Verify (729 / 9 / build / format), then the owner play-test. You publish 0.2.0, banana pins `^0.2.0`, and banana opens a PR.
+6. Verify (732 / 9 / build / format), then the owner play-test. You publish 0.2.0, banana pins `^0.2.0`, and banana opens a PR.
 
 ## Known follow-ups (out of scope)
 
