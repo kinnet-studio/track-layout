@@ -7,17 +7,6 @@ import type {
     StateMachine,
 } from '@ue-too/being';
 import { TemplateState, TemplateStateMachine } from '@ue-too/being';
-import {
-    Canvas,
-    ObservableBoardCamera,
-    ObservableInputTracker,
-    convertFromCanvas2ViewPort,
-    convertFromCanvas2Window,
-    convertFromViewPort2Canvas,
-    convertFromViewport2World,
-    convertFromWindow2Canvas,
-    convertFromWorld2Viewport,
-} from '@ue-too/board';
 import type { Point } from '@ue-too/math';
 import { PointCal } from '@ue-too/math';
 
@@ -86,15 +75,12 @@ export interface SingleSpineContext extends BaseContext {
 /** Snap radius for closing the outer vertex polygon (meters). */
 const CLOSING_SNAP_RADIUS = 2;
 
-export class SingleSpinePlacementEngine
-    extends ObservableInputTracker
-    implements SingleSpineContext
-{
+export class SingleSpinePlacementEngine implements SingleSpineContext {
     private _trackGraph: TrackGraph;
     private _stationManager: StationManager;
     private _platformManager: TrackAlignedPlatformManager;
     private _preview: SingleSpinePlacementPreview;
-    private _camera: ObservableBoardCamera;
+    private _convertWindowToWorld: (position: Point) => Point;
     private _onHint: (key: string) => void;
 
     // State
@@ -111,17 +97,15 @@ export class SingleSpinePlacementEngine
     private _offset = 0;
 
     constructor(
-        canvas: Canvas,
         trackGraph: TrackGraph,
-        camera: ObservableBoardCamera,
+        convertWindowToWorld: (position: Point) => Point,
         stationManager: StationManager,
         platformManager: TrackAlignedPlatformManager,
         preview: SingleSpinePlacementPreview,
         onHint?: (key: string) => void
     ) {
-        super(canvas);
         this._trackGraph = trackGraph;
-        this._camera = camera;
+        this._convertWindowToWorld = convertWindowToWorld;
         this._stationManager = stationManager;
         this._platformManager = platformManager;
         this._preview = preview;
@@ -518,32 +502,7 @@ export class SingleSpinePlacementEngine
     cleanup(): void {}
 
     convert2WorldPosition(position: Point): Point {
-        const pointInCanvas = convertFromWindow2Canvas(position, this.canvas);
-        const pointInViewPort = convertFromCanvas2ViewPort(pointInCanvas, {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2,
-        });
-        return convertFromViewport2World(
-            pointInViewPort,
-            this._camera.position,
-            this._camera.zoomLevel,
-            this._camera.rotation,
-            false
-        );
-    }
-
-    convert2WindowPosition(position: Point): Point {
-        const pointInViewPort = convertFromWorld2Viewport(
-            position,
-            this._camera.position,
-            this._camera.zoomLevel,
-            this._camera.rotation
-        );
-        const pointInCanvas = convertFromViewPort2Canvas(pointInViewPort, {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2,
-        });
-        return convertFromCanvas2Window(pointInCanvas, this.canvas);
+        return this._convertWindowToWorld(position);
     }
 
     // -------------------------------------------------------------------------

@@ -5,17 +5,6 @@ import {
     TemplateState,
     TemplateStateMachine,
 } from '@ue-too/being';
-import {
-    Canvas,
-    ObservableBoardCamera,
-    ObservableInputTracker,
-    convertFromCanvas2ViewPort,
-    convertFromCanvas2Window,
-    convertFromViewPort2Canvas,
-    convertFromViewport2World,
-    convertFromWindow2Canvas,
-    convertFromWorld2Viewport,
-} from '@ue-too/board';
 import type { Point } from '@ue-too/math';
 import { PointCal } from '@ue-too/math';
 
@@ -51,22 +40,18 @@ export interface StationPlacementContext extends BaseContext {
     finishDrag: (position: Point) => void;
     cancelPlacement: () => void;
     convert2WorldPosition: (position: Point) => Point;
-    convert2WindowPosition: (position: Point) => Point;
 }
 
 // ---------------------------------------------------------------------------
 // Engine (implements context)
 // ---------------------------------------------------------------------------
 
-export class StationPlacementEngine
-    extends ObservableInputTracker
-    implements StationPlacementContext
-{
+export class StationPlacementEngine implements StationPlacementContext {
     private _trackGraph: TrackGraph;
     private _stationManager: StationManager;
     private _preview: StationPlacementPreview;
     private _getGauge: () => number;
-    private _camera: ObservableBoardCamera;
+    private _convertWindowToWorld: (position: Point) => Point;
 
     private _dragStart: Point | null = null;
     /** Track spacing matching the factory defaults (platformWidth + 2*offset). */
@@ -74,16 +59,14 @@ export class StationPlacementEngine
     private _trackSpacing = 10.4;
 
     constructor(
-        canvas: Canvas,
         trackGraph: TrackGraph,
-        camera: ObservableBoardCamera,
+        convertWindowToWorld: (position: Point) => Point,
         stationManager: StationManager,
         preview: StationPlacementPreview,
         getGauge: () => number
     ) {
-        super(canvas);
         this._trackGraph = trackGraph;
-        this._camera = camera;
+        this._convertWindowToWorld = convertWindowToWorld;
         this._stationManager = stationManager;
         this._preview = preview;
         this._getGauge = getGauge;
@@ -171,32 +154,7 @@ export class StationPlacementEngine
     cleanup(): void {}
 
     convert2WorldPosition(position: Point): Point {
-        const pointInCanvas = convertFromWindow2Canvas(position, this.canvas);
-        const pointInViewPort = convertFromCanvas2ViewPort(pointInCanvas, {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2,
-        });
-        return convertFromViewport2World(
-            pointInViewPort,
-            this._camera.position,
-            this._camera.zoomLevel,
-            this._camera.rotation,
-            false
-        );
-    }
-
-    convert2WindowPosition(position: Point): Point {
-        const pointInViewPort = convertFromWorld2Viewport(
-            position,
-            this._camera.position,
-            this._camera.zoomLevel,
-            this._camera.rotation
-        );
-        const pointInCanvas = convertFromViewPort2Canvas(pointInViewPort, {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2,
-        });
-        return convertFromCanvas2Window(pointInCanvas, this.canvas);
+        return this._convertWindowToWorld(position);
     }
 }
 
