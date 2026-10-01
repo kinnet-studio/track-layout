@@ -1,0 +1,8 @@
+dist
+node_modules
+.pack
+bun.lock
+package.json
+docs
+test/fixtures
+.superpowers
