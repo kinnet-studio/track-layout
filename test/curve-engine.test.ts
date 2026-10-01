@@ -1,5 +1,5 @@
 import type { Point } from '@ue-too/math';
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 
 import {
     CurveCreationEngine,
@@ -210,5 +210,37 @@ describe('CurveCreationEngine events', () => {
         expect(tensions).toEqual([1.1]);
         expect(engine.currentTension).toBe(1.1);
         expect(elevations).toEqual([ELEVATION.ABOVE_1]);
+    });
+});
+
+describe('CurveCreationEngine.insertJointIntoTrackSegment', () => {
+    it('returns the new joint number', () => {
+        const { graph, engine } = withStraightTrack();
+        const [a, b] = graph.getJoints().map(j => j.jointNumber);
+        const m = engine.insertJointIntoTrackSegment(a, b, 0.5);
+        expect(typeof m).toBe('number');
+        expect(graph.getJoint(m!)).not.toBeNull();
+    });
+
+    it('returns null when the segment is protected', () => {
+        const { graph, engine } = withStraightTrack();
+        graph.setSegmentProtectionCheck(() => true);
+        const [a, b] = graph.getJoints().map(j => j.jointNumber);
+        expect(engine.insertJointIntoTrackSegment(a, b, 0.5)).toBeNull();
+    });
+});
+
+describe('CurveCreationEngine console output', () => {
+    it('does not dump the whole graph when committing or splitting', () => {
+        const { graph, engine } = withStraightTrack();
+        const segmentDump = spyOn(graph, 'logTrackSegments');
+        const jointDump = spyOn(graph, 'logJoints');
+
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        const [a, b] = graph.getJoints().map(j => j.jointNumber);
+        engine.insertJointIntoTrackSegment(a, b, 0.5);
+
+        expect(segmentDump).not.toHaveBeenCalled();
+        expect(jointDump).not.toHaveBeenCalled();
     });
 });

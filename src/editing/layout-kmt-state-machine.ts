@@ -64,7 +64,7 @@ export interface LayoutContext extends BaseContext {
         startJointNumber: number,
         endJointNumber: number,
         atT: number
-    ) => void;
+    ) => number | null;
     flipEndTangent: () => void;
     flipStartTangent: () => void;
     toggleStraightLine: () => void;

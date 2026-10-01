@@ -883,26 +883,25 @@ export class CurveCreationEngine implements LayoutContext {
             cps,
             this._previewCurveGauge
         );
-        // this._trackGraph.logJoints();
-        console.log('---track segments---');
-        this._trackGraph.logTrackSegments();
-        console.log('---track segments---');
         this.cancelCurrentCurve();
 
         return res;
     }
 
+    /**
+     * Splits the segment between two directly connected joints. Returns the
+     * new joint's number, or null when the graph refuses the split.
+     */
     insertJointIntoTrackSegment(
         startJointNumber: number,
         endJointNumber: number,
         atT: number
-    ) {
-        this._trackGraph.insertJointIntoTrackSegment(
+    ): number | null {
+        return this._trackGraph.insertJointIntoTrackSegment(
             startJointNumber,
             endJointNumber,
             atT
         );
-        this._trackGraph.logJoints();
     }
 
     cancelCurrentCurve() {
