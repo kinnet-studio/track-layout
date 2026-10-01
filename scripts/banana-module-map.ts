@@ -44,6 +44,12 @@ export const MODULE_MAP: Record<string, string> = {
         'src/editing/catenary-layout-engine',
     'src/trains/input-state-machine/catenary-layout-state-machine':
         'src/editing/catenary-layout-state-machine',
+    'src/stations/station-placement-state-machine':
+        'src/station-placement/station-placement-state-machine',
+    'src/stations/single-spine-placement-state-machine':
+        'src/station-placement/single-spine-placement-state-machine',
+    'src/stations/dual-spine-placement-state-machine':
+        'src/station-placement/dual-spine-placement-state-machine',
 };
 
 /**
@@ -53,11 +59,14 @@ export const MODULE_MAP: Record<string, string> = {
 export const PACKAGE_MAP: Record<string, string> = {
     'track-layout': 'src/index',
     'track-layout/editing': 'src/editing/index',
+    'track-layout/station-placement': 'src/station-placement/index',
 };
 
 /** The package entry point that exposes a track-layout module. */
 export function entryPointFor(moduleId: string): string {
-    return moduleId.startsWith('src/editing/')
-        ? 'track-layout/editing'
-        : 'track-layout';
+    if (moduleId.startsWith('src/editing/')) return 'track-layout/editing';
+    if (moduleId.startsWith('src/station-placement/')) {
+        return 'track-layout/station-placement';
+    }
+    return 'track-layout';
 }
