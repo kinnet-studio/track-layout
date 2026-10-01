@@ -3,6 +3,10 @@
     "version": "0.1.0",
     "description": "Railway track layout model: a Bezier track graph with junctions and elevation, stations and platforms, and save/load.",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/kinnet-studio/track-layout.git"
+    },
     "type": "module",
     "sideEffects": false,
     "main": "./dist/index.js",

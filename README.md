@@ -67,3 +67,13 @@ bun run typecheck
 bun run build
 bun run pack:local   # writes .pack/track-layout-local.tgz for trying in an app
 ```
+
+## Releasing
+
+Releases are published from GitHub Actions: run the **Release** workflow on `main` (or a `version/*` branch for a patch to an older line).
+
+- **Version bump:** `auto` reads the conventional commits since the last `v*` tag (`bun scripts/next-version.ts`); `patch`, `minor` and `major` force one.
+- **Dry run:** bumps and packs in the runner, then stops without publishing or pushing. It can run on any branch.
+- A release commits `chore(release): track-layout x.y.z`, tags `vx.y.z`, publishes to npm with provenance, opens a GitHub release, and, from `main`, creates a `version/x.y.z` branch.
+
+npm trusts the workflow through trusted publishing, so no npm token is stored.

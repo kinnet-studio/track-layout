@@ -1,0 +1,98 @@
+name: Release
+
+permissions:
+    contents: write
+    # npm trusted publishing (OIDC): no npm token is stored
+    id-token: write
+
+on:
+    workflow_dispatch:
+        inputs:
+            version-type:
+                type: choice
+                description: Version bump (auto = infer from conventional commits)
+                default: auto
+                options:
+                    - auto
+                    - patch
+                    - minor
+                    - major
+            dry-run:
+                type: boolean
+                description: Dry run (bump and pack, but do not publish or push)
+                default: false
+
+concurrency: release
+
+jobs:
+    release:
+        name: Publish track-layout to npm
+        runs-on: ubuntu-latest
+        steps:
+            - name: Fail unless on main or a version branch
+              if: ${{ !inputs.dry-run && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/version/') }}
+              run: |
+                  echo "Release from main or a version/* branch; other branches can only do a dry run."
+                  exit 1
+            - uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.PAT || github.token }}
+                  # Full history and tags: the auto bump reads the commits
+                  # since the last v* tag
+                  fetch-depth: 0
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.3.13
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22.19.0'
+                  registry-url: 'https://registry.npmjs.org'
+            - name: Update npm
+              # Trusted publishing needs npm >= 11.5; npm 12 requires
+              # Node >= 22.22, so pin the 11.x line
+              run: npm install -g npm@11
+            - run: bun install --frozen-lockfile
+            - name: Check
+              run: |
+                  bun run format:check
+                  bun run typecheck
+                  bun test
+            - name: Set up the git user
+              run: |
+                  git config --global user.name "github-actions[bot]"
+                  git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            - name: Bump the version
+              id: version
+              env:
+                  VERSION_TYPE: ${{ inputs.version-type }}
+              run: |
+                  if [[ "$VERSION_TYPE" == auto ]]; then
+                      BUMP=$(bun scripts/next-version.ts)
+                  else
+                      BUMP=$VERSION_TYPE
+                  fi
+                  npm version "$BUMP" -m "chore(release): track-layout %s"
+                  echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+            # prepublishOnly builds dist
+            - name: Publish
+              run: npm publish ${{ inputs.dry-run && '--dry-run' || '' }}
+            - name: Push the release commit and tag
+              if: ${{ !inputs.dry-run }}
+              run: git push --follow-tags
+            - name: Create the version branch
+              if: ${{ !inputs.dry-run && github.ref == 'refs/heads/main' }}
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  git switch -c "version/$VERSION"
+                  git push --set-upstream origin "version/$VERSION"
+            - name: Create the GitHub release
+              if: ${{ !inputs.dry-run }}
+              env:
+                  GH_TOKEN: ${{ secrets.PAT || github.token }}
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  gh release create "v$VERSION" \
+                      --repo "$GITHUB_REPOSITORY" \
+                      --title "track-layout $VERSION" \
+                      --generate-notes
