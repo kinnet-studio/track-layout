@@ -1,17 +1,8 @@
 import {
-    Canvas,
     Observable,
-    ObservableBoardCamera,
-    ObservableInputTracker,
     Observer,
     SubscriptionOptions,
     SynchronousObservable,
-    convertFromCanvas2ViewPort,
-    convertFromCanvas2Window,
-    convertFromViewPort2Canvas,
-    convertFromViewport2World,
-    convertFromWindow2Canvas,
-    convertFromWorld2Viewport,
 } from '@ue-too/board';
 import { BCurve } from '@ue-too/curve';
 import { type Point, directionAlignedToTangent } from '@ue-too/math';
@@ -36,11 +27,9 @@ export type DeletionHighlightState = {
     segmentNumber: number;
 } | null;
 
-export class CurveCreationEngine
-    extends ObservableInputTracker
-    implements LayoutContext
-{
+export class CurveCreationEngine implements LayoutContext {
     private _trackGraph: TrackGraph;
+    private _convertWindowToWorld: (position: Point) => Point;
 
     private _newStartJoint: NewJointType | null = null;
     private _newEndJoint: NewJointType | null = null;
@@ -106,12 +95,17 @@ export class CurveCreationEngine
         ]
     >();
 
-    private _camera: ObservableBoardCamera;
-
-    constructor(canvas: Canvas, camera: ObservableBoardCamera) {
-        super(canvas);
-        this._trackGraph = new TrackGraph();
-        this._camera = camera;
+    /**
+     * @param trackGraph - The graph this engine edits. The app owns it.
+     * @param convertWindowToWorld - Converts a window (pointer) position to
+     *   world coordinates.
+     */
+    constructor(
+        trackGraph: TrackGraph,
+        convertWindowToWorld: (position: Point) => Point
+    ) {
+        this._trackGraph = trackGraph;
+        this._convertWindowToWorld = convertWindowToWorld;
     }
 
     get newStartJointType(): NewJointType | null {
@@ -934,10 +928,6 @@ export class CurveCreationEngine
 
     cleanup() {}
 
-    get trackGraph(): TrackGraph {
-        return this._trackGraph;
-    }
-
     determineNewJointType(
         rawPosition: Point,
         projection: ProjectionResult,
@@ -996,35 +986,9 @@ export class CurveCreationEngine
         this._previewDrawDataObservable.notify(undefined);
     }
 
-    // position is in raw window coordinates space
+    /** Converts a window (pointer) position to world coordinates. */
     convert2WorldPosition(position: Point): Point {
-        const pointInCanvas = convertFromWindow2Canvas(position, this.canvas);
-        const pointInViewPort = convertFromCanvas2ViewPort(pointInCanvas, {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2,
-        });
-        return convertFromViewport2World(
-            pointInViewPort,
-            this._camera.position,
-            this._camera.zoomLevel,
-            this._camera.rotation,
-            false
-        );
-    }
-
-    // position is in the world space
-    convert2WindowPosition(position: Point): Point {
-        const pointInViewPort = convertFromWorld2Viewport(
-            position,
-            this._camera.position,
-            this._camera.zoomLevel,
-            this._camera.rotation
-        );
-        const pointInCanvas = convertFromViewPort2Canvas(pointInViewPort, {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2,
-        });
-        return convertFromCanvas2Window(pointInCanvas, this.canvas);
+        return this._convertWindowToWorld(position);
     }
 }
 

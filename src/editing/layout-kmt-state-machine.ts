@@ -82,7 +82,6 @@ export interface LayoutContext extends BaseContext {
     lowerTension: () => void;
     clearEndPoint: () => void;
     convert2WorldPosition: (position: Point) => Point;
-    convert2WindowPosition: (position: Point) => Point;
     previewStartProjection: ProjectionPositiveResult | null;
     newStartJointType: NewJointType | null;
     lastCurveSuccess: boolean;
