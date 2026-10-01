@@ -254,10 +254,54 @@ describe('dual-spine placement: leaving', () => {
         expect(platforms.getAllPlatforms()).toHaveLength(0);
     });
 
-    it('endPlacement leaves the tool from a cap state', () => {
-        const { machine } = setup();
-        pickSpines(machine, 10, 90);
-        machine.happens('endPlacement');
-        expect(machine.currentState).toBe('IDLE');
+    it('endPlacement leaves the tool from any state', () => {
+        const testCases: Array<{
+            state: DualSpineStates;
+            setup: (m: Machine, p: RecordingPreview) => void;
+        }> = [
+            {
+                state: 'PICK_SPINE_A_START',
+                setup: () => {},
+            },
+            {
+                state: 'PICK_SPINE_A_END',
+                setup: machine => click(machine, { x: 10, y: 3 }),
+            },
+            {
+                state: 'PICK_SPINE_B_START',
+                setup: machine => {
+                    click(machine, { x: 10, y: 3 });
+                    click(machine, { x: 90, y: 3 });
+                },
+            },
+            {
+                state: 'PICK_SPINE_B_END',
+                setup: machine => {
+                    click(machine, { x: 10, y: 3 });
+                    click(machine, { x: 90, y: 3 });
+                    click(machine, { x: 10, y: 17 });
+                },
+            },
+            {
+                state: 'DRAW_END_CAP_1',
+                setup: machine => pickSpines(machine, 10, 90),
+            },
+            {
+                state: 'DRAW_END_CAP_2',
+                setup: (machine, preview) => {
+                    pickSpines(machine, 10, 90);
+                    click(machine, anchors(preview).bEnd);
+                },
+            },
+        ];
+
+        for (const testCase of testCases) {
+            const { machine, preview } = setup();
+            testCase.setup(machine, preview);
+            expect(machine.currentState).toBe(testCase.state);
+            machine.happens('endPlacement');
+            expect(machine.currentState).toBe('IDLE');
+            expect(preview.methods.at(-1)).toBe('hidePreview');
+        }
     });
 });
