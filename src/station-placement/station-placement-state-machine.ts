@@ -133,23 +133,6 @@ export class StationPlacementEngine implements StationPlacementContext {
         this._dragStart = null;
     }
 
-    /**
-     * Creates a station with no platforms, no tracks, and no joints.
-     * Used as a prerequisite for adding track-aligned platforms.
-     */
-    createBareStation(position: Point): number {
-        const stationId = this._stationManager.createStation({
-            name: 'Station',
-            position,
-            elevation: ELEVATION.GROUND,
-            platforms: [],
-            trackSegments: [],
-            joints: [],
-            trackAlignedPlatforms: [],
-        });
-        return stationId;
-    }
-
     setup(): void {}
     cleanup(): void {}
 
@@ -273,4 +256,14 @@ export class StationPlacementStateMachine extends TemplateStateMachine<
             context
         );
     }
+}
+
+/**
+ * Creates the island station placement tool's state machine. The context is
+ * usually a StationPlacementEngine.
+ */
+export function createStationPlacementStateMachine(
+    context: StationPlacementContext
+): StationPlacementStateMachine {
+    return new StationPlacementStateMachine(context);
 }

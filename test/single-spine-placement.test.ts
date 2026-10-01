@@ -2,6 +2,7 @@ import type { Point } from '@ue-too/math';
 import { describe, expect, it } from 'bun:test';
 
 import {
+    SINGLE_SPINE_HINT_KEYS,
     SingleSpinePlacementEngine,
     createSingleSpinePlacementStateMachine,
 } from '../src/station-placement/single-spine-placement-state-machine.js';
@@ -283,5 +284,16 @@ describe('single-spine placement: leaving', () => {
             expect(machine.currentState).toBe('IDLE');
             expect(preview.methods.at(-1)).toBe('hidePreview');
         }
+    });
+});
+
+describe('single-spine hint keys', () => {
+    it('lists the keys a placement emits, in order', () => {
+        const { preview, hints, machine } = setup();
+        click(machine, { x: 10, y: 3 });
+        click(machine, { x: 90, y: 3 });
+        click(machine, { x: 90, y: 15 });
+        click(machine, startAnchor(preview));
+        expect(hints).toEqual([...SINGLE_SPINE_HINT_KEYS]);
     });
 });

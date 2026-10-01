@@ -2,6 +2,7 @@ import type { Point } from '@ue-too/math';
 import { describe, expect, it } from 'bun:test';
 
 import {
+    DUAL_SPINE_HINT_KEYS,
     DualSpinePlacementEngine,
     type DualSpineStates,
     createDualSpinePlacementStateMachine,
@@ -303,5 +304,15 @@ describe('dual-spine placement: leaving', () => {
             expect(machine.currentState).toBe('IDLE');
             expect(preview.methods.at(-1)).toBe('hidePreview');
         }
+    });
+});
+
+describe('dual-spine hint keys', () => {
+    it('lists the keys a placement emits, in order', () => {
+        const { preview, hints, machine } = setup();
+        pickSpines(machine, 10, 90);
+        click(machine, anchors(preview).bEnd);
+        click(machine, anchors(preview).aStart);
+        expect(hints).toEqual([...DUAL_SPINE_HINT_KEYS]);
     });
 });

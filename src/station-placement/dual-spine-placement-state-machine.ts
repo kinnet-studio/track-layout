@@ -51,6 +51,22 @@ export type DualSpineEvents = {
     endPlacement: {};
 };
 
+/**
+ * The hint keys the dual-spine tool passes to `onHint`, in the order it
+ * emits them.
+ */
+export const DUAL_SPINE_HINT_KEYS = [
+    'hintDualPickSpineAStart',
+    'hintDualPickSpineAEnd',
+    'hintDualPickSpineBStart',
+    'hintDualPickSpineBEnd',
+    'hintDualDrawCap1',
+    'hintDualDrawCap2',
+    'hintPlatformCreated',
+] as const;
+
+export type DualSpineHintKey = (typeof DUAL_SPINE_HINT_KEYS)[number];
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -84,7 +100,6 @@ export interface DualSpineContext extends BaseContext {
     finalize: () => void;
     cancel: () => void;
     convert2WorldPosition: (position: Point) => Point;
-    showHint: (key: string) => void;
 
     // Guard flags
     readonly hasSpineAStart: boolean;
@@ -108,7 +123,7 @@ export class DualSpinePlacementEngine implements DualSpineContext {
     private _platformManager: TrackAlignedPlatformManager;
     private _preview: DualSpinePlacementPreview;
     private _convertWindowToWorld: (position: Point) => Point;
-    private _onHint: (key: string) => void;
+    private _onHint: (key: DualSpineHintKey) => void;
 
     // State
     private _activeStationId: number | null = null;
@@ -140,7 +155,7 @@ export class DualSpinePlacementEngine implements DualSpineContext {
         stationManager: StationManager,
         platformManager: TrackAlignedPlatformManager,
         preview: DualSpinePlacementPreview,
-        onHint?: (key: string) => void
+        onHint?: (key: DualSpineHintKey) => void
     ) {
         this._trackGraph = trackGraph;
         this._convertWindowToWorld = convertWindowToWorld;
@@ -860,10 +875,6 @@ export class DualSpinePlacementEngine implements DualSpineContext {
     cancel(): void {
         this._preview.hidePreview();
         this._resetState();
-    }
-
-    showHint(key: string): void {
-        this._onHint(key);
     }
 
     setup(): void {}

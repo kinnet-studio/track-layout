@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
     StationPlacementEngine,
     StationPlacementStateMachine,
+    createStationPlacementStateMachine,
 } from '../src/station-placement/station-placement-state-machine.js';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
@@ -121,5 +122,23 @@ describe('island station placement', () => {
         machine.happens('endPlacement');
         expect(machine.currentState).toBe('IDLE');
         expect(preview.methods.at(-1)).toBe('hidePreview');
+    });
+});
+
+describe('createStationPlacementStateMachine', () => {
+    it('builds a machine that places a station', () => {
+        const stations = new StationManager();
+        const engine = new StationPlacementEngine(
+            new TrackGraph(),
+            identity,
+            stations,
+            new RecordingPreview(),
+            () => 1.067
+        );
+        const machine = createStationPlacementStateMachine(engine);
+        machine.happens('startPlacement');
+        machine.happens('leftPointerUp', { x: 0, y: 0 });
+        machine.happens('leftPointerUp', { x: 50, y: 0 });
+        expect(stations.getStations()).toHaveLength(1);
     });
 });

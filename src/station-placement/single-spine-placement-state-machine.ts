@@ -46,6 +46,19 @@ export type SingleSpineEvents = {
     endPlacement: {};
 };
 
+/**
+ * The hint keys the single-spine tool passes to `onHint`, in the order it
+ * emits them.
+ */
+export const SINGLE_SPINE_HINT_KEYS = [
+    'hintPickStart',
+    'hintPickEnd',
+    'hintDrawOuter',
+    'hintPlatformCreated',
+] as const;
+
+export type SingleSpineHintKey = (typeof SINGLE_SPINE_HINT_KEYS)[number];
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -65,7 +78,6 @@ export interface SingleSpineContext extends BaseContext {
     finalize: () => void;
     cancel: () => void;
     convert2WorldPosition: (position: Point) => Point;
-    showHint: (key: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +93,7 @@ export class SingleSpinePlacementEngine implements SingleSpineContext {
     private _platformManager: TrackAlignedPlatformManager;
     private _preview: SingleSpinePlacementPreview;
     private _convertWindowToWorld: (position: Point) => Point;
-    private _onHint: (key: string) => void;
+    private _onHint: (key: SingleSpineHintKey) => void;
 
     // State
     private _activeStationId: number | null = null;
@@ -102,7 +114,7 @@ export class SingleSpinePlacementEngine implements SingleSpineContext {
         stationManager: StationManager,
         platformManager: TrackAlignedPlatformManager,
         preview: SingleSpinePlacementPreview,
-        onHint?: (key: string) => void
+        onHint?: (key: SingleSpineHintKey) => void
     ) {
         this._trackGraph = trackGraph;
         this._convertWindowToWorld = convertWindowToWorld;
@@ -492,10 +504,6 @@ export class SingleSpinePlacementEngine implements SingleSpineContext {
     cancel(): void {
         this._preview.hidePreview();
         this._resetState();
-    }
-
-    showHint(key: string): void {
-        this._onHint(key);
     }
 
     setup(): void {}
