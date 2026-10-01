@@ -105,6 +105,22 @@ describe('TrackAlignedPlatformManager add and remove events', () => {
         expect(platforms.getPlatform(other)).not.toBeNull();
     });
 
+    it('fires one removed event per platform when a subscriber destroys a sibling mid-cascade', () => {
+        const platforms = new TrackAlignedPlatformManager();
+        const a = platforms.createPlatform(platformFor(1));
+        const b = platforms.createPlatform(platformFor(1));
+        const removed: number[] = [];
+        platforms.onPlatformRemoved(id => {
+            removed.push(id);
+            if (id === a) platforms.destroyPlatform(b);
+        });
+
+        platforms.destroyPlatformsForStation(1);
+        expect(removed).toEqual([a, b]);
+        expect(platforms.getPlatform(a)).toBeNull();
+        expect(platforms.getPlatform(b)).toBeNull();
+    });
+
     it('fires no removed event for a platform that does not exist', () => {
         const { platforms, log } = loggedPlatforms();
         platforms.destroyPlatform(3);

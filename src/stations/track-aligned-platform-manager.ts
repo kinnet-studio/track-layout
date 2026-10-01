@@ -136,6 +136,7 @@ export class TrackAlignedPlatformManager {
             .filter(({ entity }) => entity.stationId === stationId)
             .map(({ index, entity }) => ({ index, entity }));
         for (const { index, entity } of toDestroy) {
+            if (this._manager.getEntity(index) === null) continue;
             if (this._onBeforeDestroy) {
                 this._onBeforeDestroy(index, entity);
             }
