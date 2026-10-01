@@ -70,6 +70,14 @@ export class TrackGraph {
         this._segmentProtectionCheck = check;
     }
 
+    /**
+     * Whether the registered protection check reports the segment as
+     * protected. Protected segments can be neither removed nor split.
+     */
+    isSegmentProtected(segmentNumber: number): boolean {
+        return this._segmentProtectionCheck?.(segmentNumber) ?? false;
+    }
+
     getJoints(): { jointNumber: number; joint: TrackJoint }[] {
         return this._jointManager.getJoints();
     }
@@ -112,6 +120,13 @@ export class TrackGraph {
         if (segment === null) {
             console.warn(
                 'track segment number does not correspond to a track segment'
+            );
+            return null;
+        }
+
+        if (this.isSegmentProtected(trackSegmentNumber)) {
+            console.warn(
+                `Cannot split segment ${trackSegmentNumber}: it is protected`
             );
             return null;
         }
@@ -251,17 +266,22 @@ export class TrackGraph {
         return newJointNumber;
     }
 
+    /**
+     * Splits the segment between two directly connected joints at `atT`.
+     * Returns the new joint's number, or null when the joints are unknown,
+     * not directly connected, sloped, or the segment is protected.
+     */
     insertJointIntoTrackSegment(
         startJointNumber: number,
         endJointNumber: number,
         atT: number
-    ) {
+    ): number | null {
         const startJoint = this._jointManager.getJoint(startJointNumber);
         const endJoint = this._jointManager.getJoint(endJointNumber);
 
         if (startJoint === null || endJoint === null) {
             console.warn('startJoint or endJoint not found');
-            return;
+            return null;
         }
 
         if (startJoint.elevation !== endJoint.elevation) {
@@ -277,7 +297,7 @@ export class TrackGraph {
             console.warn(
                 'trackSegment not found or not the correct track segment; something is wrong'
             );
-            return;
+            return null;
         }
 
         const segment =
@@ -289,7 +309,14 @@ export class TrackGraph {
             console.warn(
                 'track segment number does not correspond to a track segment'
             );
-            return;
+            return null;
+        }
+
+        if (this.isSegmentProtected(trackSegmentNumber)) {
+            console.warn(
+                `Cannot split segment ${trackSegmentNumber}: it is protected`
+            );
+            return null;
         }
 
         const newControlPointGroups = segment.curve.split(atT);
@@ -407,6 +434,8 @@ export class TrackGraph {
             secondNewSegment: secondSegmentNumber,
             newJointNumber,
         });
+
+        return newJointNumber;
     }
 
     get trackOffsets(): { positive: Point[]; negative: Point[] }[] {
@@ -425,12 +454,9 @@ export class TrackGraph {
             return;
         }
 
-        if (
-            this._segmentProtectionCheck !== null &&
-            this._segmentProtectionCheck(trackSegmentNumber)
-        ) {
+        if (this.isSegmentProtected(trackSegmentNumber)) {
             console.warn(
-                `Cannot delete segment ${trackSegmentNumber}: protected by a track-aligned platform`
+                `Cannot delete segment ${trackSegmentNumber}: it is protected`
             );
             return;
         }
