@@ -42,6 +42,19 @@ import {
     trackIsSloped,
 } from './utils.js';
 
+/**
+ * Waits until the browser has painted (two animation frames), so progress UI
+ * updates between loading batches. Outside a browser it waits one macrotask.
+ */
+export function defaultYieldToFrame(): Promise<void> {
+    if (typeof requestAnimationFrame === 'function') {
+        return new Promise(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+    }
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 export type SegmentSplitInfo = {
     oldSegmentNumber: number;
     splitT: number;
@@ -1364,6 +1377,8 @@ export class TrackGraph {
         options?: {
             batchSize?: number;
             onProgress?: (loaded: number, total: number) => void;
+            /** Awaited between batches; defaults to defaultYieldToFrame. */
+            yieldToFrame?: () => Promise<void>;
         }
     ): Promise<void> {
         const existingSegmentIds = [...this._trackCurveManager.livingEntities];
@@ -1390,6 +1405,7 @@ export class TrackGraph {
         }
 
         const BATCH_SIZE = options?.batchSize ?? 50;
+        const yieldToFrame = options?.yieldToFrame ?? defaultYieldToFrame;
         const segments = data.segments;
 
         for (let i = 0; i < segments.length; i += BATCH_SIZE) {
@@ -1418,13 +1434,7 @@ export class TrackGraph {
             options?.onProgress?.(end, segments.length);
 
             if (end < segments.length) {
-                // Use double-rAF to guarantee the browser paints the progress
-                // update before resuming the next batch of segment loading.
-                await new Promise<void>(resolve =>
-                    requestAnimationFrame(() =>
-                        requestAnimationFrame(() => resolve())
-                    )
-                );
+                await yieldToFrame();
             }
         }
 
