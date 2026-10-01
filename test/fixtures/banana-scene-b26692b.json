@@ -1,0 +1,669 @@
+{
+    "source": "banana b26692b model code, verbatim port; scripts/generate-golden-fixture.ts",
+    "tracks": {
+        "joints": [
+            {
+                "jointNumber": 0,
+                "position": {
+                    "x": 0,
+                    "y": 0
+                },
+                "connections": [
+                    [
+                        3,
+                        2
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [
+                        3
+                    ],
+                    "reverseTangent": []
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 1,
+                "position": {
+                    "x": 100,
+                    "y": 0
+                },
+                "connections": [
+                    [
+                        2,
+                        1
+                    ],
+                    [
+                        3,
+                        3
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [
+                        2
+                    ],
+                    "reverseTangent": [
+                        3
+                    ]
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 2,
+                "position": {
+                    "x": 200,
+                    "y": 50
+                },
+                "connections": [
+                    [
+                        1,
+                        1
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [],
+                    "reverseTangent": [
+                        1
+                    ]
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 3,
+                "position": {
+                    "x": 50,
+                    "y": 0
+                },
+                "connections": [
+                    [
+                        0,
+                        2
+                    ],
+                    [
+                        1,
+                        3
+                    ],
+                    [
+                        4,
+                        4
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [
+                        1,
+                        4
+                    ],
+                    "reverseTangent": [
+                        0
+                    ]
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 4,
+                "position": {
+                    "x": 100,
+                    "y": -40
+                },
+                "connections": [
+                    [
+                        3,
+                        4
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": -1
+                },
+                "direction": {
+                    "tangent": [],
+                    "reverseTangent": [
+                        3
+                    ]
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 5,
+                "position": {
+                    "x": 75,
+                    "y": -80
+                },
+                "connections": [
+                    [
+                        6,
+                        5
+                    ]
+                ],
+                "tangent": {
+                    "x": 0,
+                    "y": 1
+                },
+                "direction": {
+                    "tangent": [
+                        6
+                    ],
+                    "reverseTangent": []
+                },
+                "elevation": 1
+            },
+            {
+                "jointNumber": 6,
+                "position": {
+                    "x": 75,
+                    "y": 80
+                },
+                "connections": [
+                    [
+                        5,
+                        5
+                    ]
+                ],
+                "tangent": {
+                    "x": 0,
+                    "y": 1
+                },
+                "direction": {
+                    "tangent": [],
+                    "reverseTangent": [
+                        5
+                    ]
+                },
+                "elevation": 1
+            },
+            {
+                "jointNumber": 7,
+                "position": {
+                    "x": 200,
+                    "y": -50
+                },
+                "connections": [
+                    [
+                        8,
+                        6
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [
+                        8
+                    ],
+                    "reverseTangent": []
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 8,
+                "position": {
+                    "x": 300,
+                    "y": -50
+                },
+                "connections": [
+                    [
+                        7,
+                        6
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [],
+                    "reverseTangent": [
+                        7
+                    ]
+                },
+                "elevation": 1
+            },
+            {
+                "jointNumber": 9,
+                "position": {
+                    "x": -60,
+                    "y": 205.2
+                },
+                "connections": [
+                    [
+                        10,
+                        7
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [
+                        10
+                    ],
+                    "reverseTangent": []
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 10,
+                "position": {
+                    "x": 60,
+                    "y": 205.2
+                },
+                "connections": [
+                    [
+                        9,
+                        7
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [],
+                    "reverseTangent": [
+                        9
+                    ]
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 11,
+                "position": {
+                    "x": -60,
+                    "y": 194.8
+                },
+                "connections": [
+                    [
+                        12,
+                        8
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [
+                        12
+                    ],
+                    "reverseTangent": []
+                },
+                "elevation": 0
+            },
+            {
+                "jointNumber": 12,
+                "position": {
+                    "x": 60,
+                    "y": 194.8
+                },
+                "connections": [
+                    [
+                        11,
+                        8
+                    ]
+                ],
+                "tangent": {
+                    "x": 1,
+                    "y": 0
+                },
+                "direction": {
+                    "tangent": [],
+                    "reverseTangent": [
+                        11
+                    ]
+                },
+                "elevation": 0
+            }
+        ],
+        "segments": [
+            {
+                "segmentNumber": 1,
+                "controlPoints": [
+                    {
+                        "x": 100,
+                        "y": 0
+                    },
+                    {
+                        "x": 150,
+                        "y": 0
+                    },
+                    {
+                        "x": 200,
+                        "y": 50
+                    }
+                ],
+                "t0Joint": 1,
+                "t1Joint": 2,
+                "elevation": {
+                    "from": 0,
+                    "to": 0
+                },
+                "gauge": 1.067,
+                "splits": [],
+                "trackStyle": "slab"
+            },
+            {
+                "segmentNumber": 2,
+                "controlPoints": [
+                    {
+                        "x": 0,
+                        "y": 0
+                    },
+                    {
+                        "x": 25,
+                        "y": 0
+                    },
+                    {
+                        "x": 50,
+                        "y": 0
+                    }
+                ],
+                "t0Joint": 0,
+                "t1Joint": 3,
+                "elevation": {
+                    "from": 0,
+                    "to": 0
+                },
+                "gauge": 1.067,
+                "splits": []
+            },
+            {
+                "segmentNumber": 3,
+                "controlPoints": [
+                    {
+                        "x": 50,
+                        "y": 0
+                    },
+                    {
+                        "x": 75,
+                        "y": 0
+                    },
+                    {
+                        "x": 100,
+                        "y": 0
+                    }
+                ],
+                "t0Joint": 3,
+                "t1Joint": 1,
+                "elevation": {
+                    "from": 0,
+                    "to": 0
+                },
+                "gauge": 1.067,
+                "splits": []
+            },
+            {
+                "segmentNumber": 4,
+                "controlPoints": [
+                    {
+                        "x": 50,
+                        "y": 0
+                    },
+                    {
+                        "x": 80,
+                        "y": 0
+                    },
+                    {
+                        "x": 100,
+                        "y": -40
+                    }
+                ],
+                "t0Joint": 3,
+                "t1Joint": 4,
+                "elevation": {
+                    "from": 0,
+                    "to": 0
+                },
+                "gauge": 1.067,
+                "splits": [],
+                "electrified": true,
+                "catenarySide": -1
+            },
+            {
+                "segmentNumber": 5,
+                "controlPoints": [
+                    {
+                        "x": 75,
+                        "y": -80
+                    },
+                    {
+                        "x": 75,
+                        "y": 0
+                    },
+                    {
+                        "x": 75,
+                        "y": 80
+                    }
+                ],
+                "t0Joint": 5,
+                "t1Joint": 6,
+                "elevation": {
+                    "from": 1,
+                    "to": 1
+                },
+                "gauge": 1.067,
+                "splits": []
+            },
+            {
+                "segmentNumber": 6,
+                "controlPoints": [
+                    {
+                        "x": 200,
+                        "y": -50
+                    },
+                    {
+                        "x": 250,
+                        "y": -50
+                    },
+                    {
+                        "x": 300,
+                        "y": -50
+                    }
+                ],
+                "t0Joint": 7,
+                "t1Joint": 8,
+                "elevation": {
+                    "from": 0,
+                    "to": 1
+                },
+                "gauge": 1.067,
+                "splits": [],
+                "bed": true
+            },
+            {
+                "segmentNumber": 7,
+                "controlPoints": [
+                    {
+                        "x": -60,
+                        "y": 205.2
+                    },
+                    {
+                        "x": 0,
+                        "y": 205.2
+                    },
+                    {
+                        "x": 60,
+                        "y": 205.2
+                    }
+                ],
+                "t0Joint": 9,
+                "t1Joint": 10,
+                "elevation": {
+                    "from": 0,
+                    "to": 0
+                },
+                "gauge": 1.067,
+                "splits": []
+            },
+            {
+                "segmentNumber": 8,
+                "controlPoints": [
+                    {
+                        "x": -60,
+                        "y": 194.8
+                    },
+                    {
+                        "x": 0,
+                        "y": 194.8
+                    },
+                    {
+                        "x": 60,
+                        "y": 194.8
+                    }
+                ],
+                "t0Joint": 11,
+                "t1Joint": 12,
+                "elevation": {
+                    "from": 0,
+                    "to": 0
+                },
+                "gauge": 1.067,
+                "splits": []
+            }
+        ]
+    },
+    "stations": {
+        "stations": [
+            {
+                "id": 0,
+                "name": "Island",
+                "position": {
+                    "x": 0,
+                    "y": 200
+                },
+                "elevation": 0,
+                "platforms": [
+                    {
+                        "id": 0,
+                        "track": 7,
+                        "width": 4,
+                        "offset": 1.2,
+                        "side": -1,
+                        "stopPositions": [
+                            {
+                                "id": 0,
+                                "trackSegmentId": 7,
+                                "direction": "tangent",
+                                "tValue": 0.5
+                            },
+                            {
+                                "id": 1,
+                                "trackSegmentId": 7,
+                                "direction": "reverseTangent",
+                                "tValue": 0.5
+                            }
+                        ]
+                    },
+                    {
+                        "id": 1,
+                        "track": 8,
+                        "width": 4,
+                        "offset": 1.2,
+                        "side": 1,
+                        "stopPositions": [
+                            {
+                                "id": 0,
+                                "trackSegmentId": 8,
+                                "direction": "tangent",
+                                "tValue": 0.5
+                            },
+                            {
+                                "id": 1,
+                                "trackSegmentId": 8,
+                                "direction": "reverseTangent",
+                                "tValue": 0.5
+                            }
+                        ]
+                    }
+                ],
+                "trackSegments": [
+                    7,
+                    8
+                ],
+                "joints": [
+                    9,
+                    10,
+                    11,
+                    12
+                ],
+                "trackAlignedPlatforms": []
+            },
+            {
+                "id": 1,
+                "name": "Riverside",
+                "position": {
+                    "x": 150,
+                    "y": 10
+                },
+                "elevation": 0,
+                "platforms": [],
+                "trackSegments": [
+                    1
+                ],
+                "joints": [],
+                "trackAlignedPlatforms": [
+                    0
+                ]
+            }
+        ]
+    },
+    "trackAlignedPlatforms": {
+        "platforms": [
+            {
+                "id": 0,
+                "stationId": 1,
+                "spine": [
+                    {
+                        "trackSegment": 1,
+                        "tStart": 0.2,
+                        "tEnd": 0.8,
+                        "side": 1
+                    }
+                ],
+                "offset": 2.5,
+                "outerVertices": [
+                    {
+                        "x": 120,
+                        "y": 5
+                    },
+                    {
+                        "x": 170,
+                        "y": 15
+                    }
+                ],
+                "stopPositions": [
+                    {
+                        "id": 0,
+                        "trackSegmentId": 1,
+                        "direction": "tangent",
+                        "tValue": 0.5
+                    }
+                ]
+            }
+        ]
+    },
+    "jointDirectionPreferences": [
+        {
+            "joint": 3,
+            "tangent": 1,
+            "reverseTangent": 0
+        }
+    ]
+}
