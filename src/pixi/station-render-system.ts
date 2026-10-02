@@ -6,7 +6,7 @@ import { LEVEL_HEIGHT } from '../index.js';
 import type { TrackGraph } from '../index.js';
 import type { StationManager } from '../index.js';
 import type { Platform } from '../index.js';
-import type { StationPlacementPreview } from '../station-placement/index.js';
+import type { StationPlacementPreview } from '../station-placement/preview.js';
 import type { LayerHost } from './layer-host.js';
 import type { TrackTextureRenderer } from './track-render-system.js';
 

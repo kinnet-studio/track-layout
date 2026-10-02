@@ -27,6 +27,11 @@
             "import": "./dist/station-placement/index.js",
             "default": "./dist/station-placement/index.js"
         },
+        "./pixi": {
+            "types": "./dist/pixi/index.d.ts",
+            "import": "./dist/pixi/index.js",
+            "default": "./dist/pixi/index.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [

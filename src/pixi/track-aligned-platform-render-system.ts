@@ -10,7 +10,7 @@ import type { TrackAlignedPlatform } from '../index.js';
 import type {
     DualSpinePlacementPreview,
     SingleSpinePlacementPreview,
-} from '../station-placement/index.js';
+} from '../station-placement/preview.js';
 import type { LayerHost } from './layer-host.js';
 import type { TrackTextureRenderer } from './track-render-system.js';
 
