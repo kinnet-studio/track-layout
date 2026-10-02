@@ -92,7 +92,7 @@ describe('TrackAlignedPlatformRenderSystem', () => {
         expect(container.destroyed).toBe(true);
     });
 
-    it('draws every preview on one unbanded graphics at z-index 9999', () => {
+    it('draws the track highlight on one unbanded graphics at z-index 9999, which every preview reuses', () => {
         const { host, renderer } = scene();
 
         renderer.showTrackHighlight(0, 0.5, 1, 2);
@@ -134,7 +134,84 @@ describe('TrackAlignedPlatformRenderSystem', () => {
         );
 
         expect(previewGraphics(host)).toBe(preview);
-        expect(preview.context.instructions.length).toBeGreaterThan(0);
+    });
+
+    it('draws the single-spine placement preview', () => {
+        const { host, renderer } = scene();
+
+        renderer.showPlacementPreview(
+            [
+                { x: 0, y: 2 },
+                { x: 100, y: 2 },
+            ],
+            [{ x: 100, y: 8 }],
+            { x: 0, y: 2 },
+            { x: 100, y: 2 }
+        );
+
+        expect(host.drawableKeys).toEqual([PREVIEW]);
+        expect(
+            previewGraphics(host).context.instructions.length
+        ).toBeGreaterThan(0);
+    });
+
+    it('draws the dual-spine placement preview', () => {
+        const { host, renderer } = scene();
+
+        renderer.showDualSpinePlacementPreview(
+            [
+                { x: 0, y: 2 },
+                { x: 100, y: 2 },
+            ],
+            [
+                { x: 0, y: 12 },
+                { x: 100, y: 12 },
+            ],
+            [{ x: 100, y: 7 }],
+            [],
+            { x: 0, y: 2 },
+            { x: 100, y: 2 },
+            { x: 0, y: 12 },
+            null
+        );
+
+        expect(host.drawableKeys).toEqual([PREVIEW]);
+        expect(
+            previewGraphics(host).context.instructions.length
+        ).toBeGreaterThan(0);
+    });
+
+    it('adds the cap-drawing hover to the preview already shown', () => {
+        const { host, renderer } = scene();
+
+        renderer.showDualSpinePlacementPreview(
+            [
+                { x: 0, y: 2 },
+                { x: 100, y: 2 },
+            ],
+            [
+                { x: 0, y: 12 },
+                { x: 100, y: 12 },
+            ],
+            [{ x: 100, y: 7 }],
+            [],
+            { x: 0, y: 2 },
+            { x: 100, y: 2 },
+            { x: 0, y: 12 },
+            null
+        );
+        const before = previewGraphics(host).context.instructions.length;
+
+        renderer.showCapDrawingHover(
+            { x: 100, y: 7 },
+            { x: 50, y: 7 },
+            { x: 0, y: 2 },
+            false
+        );
+
+        expect(
+            previewGraphics(host).context.instructions.length
+        ).toBeGreaterThan(before);
     });
 
     it('draws no track highlight for a segment that does not exist', () => {
