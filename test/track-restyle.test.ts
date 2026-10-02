@@ -136,6 +136,63 @@ describe('restyling a laid segment', () => {
         expect(after1.shadow).toBe(before1.shadow);
     });
 
+    it('rebuilds every piece of a segment split at a crossing', () => {
+        const host = new RecordingLayerHost();
+        const graph = new TrackGraph();
+        new TrackRenderSystem(host, graph.trackCurveManager, camera(), {
+            textureRenderer,
+        });
+        // Segment 0 runs along the ground. Segment 1 ramps up across it, so
+        // the model splits segment 1's draw data at the crossing.
+        const east = { x: 1, y: 0 };
+        const south = { x: 0, y: 1 };
+        const west0 = graph.createNewEmptyJoint(
+            { x: 0, y: 0 },
+            east,
+            ELEVATION.GROUND
+        );
+        const east0 = graph.createNewEmptyJoint(
+            { x: 100, y: 0 },
+            east,
+            ELEVATION.GROUND
+        );
+        graph.connectJoints(west0, east0, [{ x: 50, y: 0 }]);
+        const north1 = graph.createNewEmptyJoint(
+            { x: 50, y: -50 },
+            south,
+            ELEVATION.GROUND
+        );
+        const south1 = graph.createNewEmptyJoint(
+            { x: 50, y: 50 },
+            south,
+            ELEVATION.ABOVE_1
+        );
+        graph.connectJoints(north1, south1, [{ x: 50, y: 0 }]);
+
+        const keys = graph.trackCurveManager.persistedDrawData
+            .filter(
+                drawData =>
+                    drawData.originalTrackSegment.trackSegmentNumber === 1
+            )
+            .map(({ originalTrackSegment: { tValInterval } }) =>
+                drawKey(1, tValInterval.start, tValInterval.end)
+            );
+        expect(keys.length).toBeGreaterThan(1);
+        const before = keys.map(key => host.bandItem(key));
+        for (const [i, key] of keys.entries()) {
+            expect(before[i]).toBeDefined();
+            expect(host.bedElevationOf(key)).toBeUndefined();
+        }
+
+        graph.setSegmentStyle(1, { bed: true });
+
+        for (const [i, key] of keys.entries()) {
+            expect(host.bedElevationOf(key)).toBeDefined();
+            expect(host.bandItem(key)).not.toBe(before[i]);
+            expect(before[i]!.destroyed).toBe(true);
+        }
+    });
+
     it('keeps the rebuilt pieces hidden while zoomed out', () => {
         const { after0 } = restyled({}, { bed: true });
 
