@@ -191,6 +191,8 @@ export class TrackCurveManager {
 
     get persistedDrawData(): (TrackSegmentDrawData & {
         callback(index: number): void;
+        positiveOffsets: Point[];
+        negativeOffsets: Point[];
     })[] {
         return this._persistedDrawData;
     }

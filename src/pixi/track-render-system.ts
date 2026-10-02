@@ -375,47 +375,29 @@ export class TrackRenderSystem {
     }
 
     /**
-     * Rebuilds catenary masts for a segment whose style changed in the model
+     * Redraws every piece of a segment whose style changed in the model
      * (TrackGraph.setSegmentStyle). The draw data already carries the new
-     * style; only the mast graphics need replacing.
+     * style, so each piece goes through the same remove-and-add path as a
+     * draw-data change.
      */
     private _onSegmentStyleChanged({
         segmentNumber,
     }: SegmentStyleChange): void {
-        for (const drawData of this._trackCurveManager.persistedDrawData) {
-            if (
-                drawData.originalTrackSegment.trackSegmentNumber !==
+        const pieces = this._trackCurveManager.persistedDrawData.filter(
+            drawData =>
+                drawData.originalTrackSegment.trackSegmentNumber ===
                 segmentNumber
-            ) {
-                continue;
-            }
-            const key = JSON.stringify({
-                trackSegmentNumber: segmentNumber,
-                tValInterval: drawData.originalTrackSegment.tValInterval,
-            });
-
-            const existing = this._catenaryMap.get(key);
-            if (existing !== undefined) {
-                const removed = this._worldRenderSystem.removeFromBand(
-                    `__catenary__${key}`
-                );
-                removed?.destroy({ children: true });
-                this._catenaryMap.delete(key);
-            }
-
-            const bandIndex = this._drawDataBandMap.get(key);
-            if (!drawData.electrified || bandIndex === undefined) {
-                continue;
-            }
-            const catenaryContainer = this._buildCatenaryForDrawData(drawData);
-            this._worldRenderSystem.addToBand(
-                `__catenary__${key}`,
-                catenaryContainer,
-                bandIndex,
-                'catenary'
+        );
+        if (pieces.length === 0) return;
+        for (const drawData of pieces) {
+            this._onDelete(
+                JSON.stringify({
+                    trackSegmentNumber: segmentNumber,
+                    tValInterval: drawData.originalTrackSegment.tValInterval,
+                })
             );
-            this._catenaryMap.set(key, catenaryContainer);
         }
+        this._onNewTrackData(-1, pieces);
     }
 
     get sunAngle(): number {
