@@ -142,9 +142,9 @@ export class TrackAlignedPlatformRenderSystem
     private _previewKey = 'track-aligned-platform-preview';
 
     /**
-     * Draws each platform the manager creates from now on, at its station's
-     * elevation, and removes each one it destroys. Platforms that already
-     * exist are drawn with {@link addPlatform}.
+     * Draws the platforms the manager already holds, then each platform it
+     * creates from now on, at its station's elevation, and removes each one
+     * it destroys.
      */
     constructor(
         worldRenderSystem: LayerHost,
@@ -168,6 +168,10 @@ export class TrackAlignedPlatformRenderSystem
             id => this.removePlatform(id),
             options
         );
+
+        for (const { id } of platformManager.getAllPlatforms()) {
+            this.addPlatform(id, this._stationElevation(id));
+        }
     }
 
     /** The elevation of a platform's station, or 0 when either is missing. */

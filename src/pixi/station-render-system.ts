@@ -51,9 +51,8 @@ export class StationRenderSystem implements StationPlacementPreview {
     private _abortController = new AbortController();
 
     /**
-     * Draws each station the manager creates from now on, and removes each
-     * one it destroys. Stations that already exist are drawn with
-     * {@link addStation}.
+     * Draws the stations the manager already holds, then each station it
+     * creates from now on, and removes each one it destroys.
      */
     constructor(
         worldRenderSystem: LayerHost,
@@ -69,6 +68,10 @@ export class StationRenderSystem implements StationPlacementPreview {
         const options = { signal: this._abortController.signal };
         stationManager.onStationAdded(id => this.addStation(id), options);
         stationManager.onStationRemoved(id => this.removeStation(id), options);
+
+        for (const { id } of stationManager.getStations()) {
+            this.addStation(id);
+        }
     }
 
     // ---------------------------------------------------------------------------

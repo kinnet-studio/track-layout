@@ -13,8 +13,8 @@ const PREVIEW = 'track-aligned-platform-preview';
 
 /**
  * A renderer over one straight segment, 0 to 100 along x, and a platform
- * along its left side for station 1. The platform exists before the
- * renderer, so the tests draw it explicitly.
+ * along its left side for station 1. The renderer draws the platform when
+ * it is built; the fixture removes it so each test draws it itself.
  */
 function scene(texture: TrackTextureRenderer | null = textureRenderer) {
     const host = new RecordingLayerHost();
@@ -41,6 +41,7 @@ function scene(texture: TrackTextureRenderer | null = textureRenderer) {
         graph,
         texture
     );
+    renderer.removePlatform(id);
     return { host, graph, platforms, renderer, id };
 }
 

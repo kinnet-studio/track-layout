@@ -168,3 +168,34 @@ describe('station and platform renderers follow their managers', () => {
         expect(host.log).toEqual([]);
     });
 });
+
+describe('station and platform renderers built over existing content', () => {
+    it('draw the stations and platforms that exist when they are built', () => {
+        const host = new LoggingLayerHost();
+        const graph = new TrackGraph();
+        layTrack(graph, [
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+        ]);
+        const stations = new StationManager();
+        const platforms = new TrackAlignedPlatformManager();
+        const stationId = stations.createStation(station(ELEVATION.ABOVE_1));
+        const platformId = platforms.createPlatform(platformFor(stationId));
+
+        new StationRenderSystem(host, stations, graph, textureRenderer);
+        new TrackAlignedPlatformRenderSystem(
+            host,
+            platforms,
+            stations,
+            graph,
+            textureRenderer
+        );
+
+        expect(host.log).toEqual([
+            `+station-${stationId}`,
+            `+track-aligned-platform-${platformId}`,
+        ]);
+        expect(host.bandOf(`station-${stationId}`)).toBe(4);
+        expect(host.bandOf(`track-aligned-platform-${platformId}`)).toBe(4);
+    });
+});

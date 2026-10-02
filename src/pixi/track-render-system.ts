@@ -106,9 +106,9 @@ export type TrackRenderSystemOptions = {
 };
 
 /**
- * Draws track into a {@link LayerHost} as the track curve manager adds and
- * removes it. It can't draw track that already exists, so build it before
- * laying or loading any track.
+ * Draws track into a {@link LayerHost}: the track the curve manager already
+ * holds when the renderer is built, then track as the manager adds and
+ * removes it.
  */
 export class TrackRenderSystem {
     private _worldRenderSystem: LayerHost;
@@ -361,7 +361,28 @@ export class TrackRenderSystem {
             signal: this._abortController.signal,
         });
 
+        this._drawExistingTrack();
         this._applyZoomLod(this._camera.zoomLevel);
+    }
+
+    /**
+     * Draws the track the manager already holds, through the same handlers
+     * that draw track added later.
+     */
+    private _drawExistingTrack(): void {
+        for (const segmentNumber of this._trackCurveManager.livingEntities) {
+            const segment =
+                this._trackCurveManager.getTrackSegmentWithJoints(
+                    segmentNumber
+                );
+            if (segment !== null) {
+                this._onAddTrackSegment(segmentNumber, segment);
+            }
+        }
+        const drawData = this._trackCurveManager.persistedDrawData;
+        if (drawData.length > 0) {
+            this._onNewTrackData(-1, drawData);
+        }
     }
 
     /** Whether the elevation gradient is shown on ballast (vs solid color). */
@@ -717,6 +738,22 @@ export class TrackRenderSystem {
         if (this._bedTexture !== null) {
             this._bedTexture.destroy(true);
             this._bedTexture = null;
+        }
+        if (this._tunnelWallTexture !== null) {
+            this._tunnelWallTexture.destroy(true);
+            this._tunnelWallTexture = null;
+        }
+        if (this._tunnelCeilingTexture !== null) {
+            this._tunnelCeilingTexture.destroy(true);
+            this._tunnelCeilingTexture = null;
+        }
+        if (this._cuttingWallTexture !== null) {
+            this._cuttingWallTexture.destroy(true);
+            this._cuttingWallTexture = null;
+        }
+        if (this._cuttingCoverTexture !== null) {
+            this._cuttingCoverTexture.destroy(true);
+            this._cuttingCoverTexture = null;
         }
     }
 

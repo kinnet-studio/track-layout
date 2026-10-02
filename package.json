@@ -51,7 +51,7 @@
         "@ue-too/board": "^0.19.0",
         "@ue-too/curve": "^0.19.0",
         "@ue-too/math": "^0.19.0",
-        "pixi.js": "8.20.1"
+        "pixi.js": "^8.20.1"
     },
     "peerDependenciesMeta": {
         "@ue-too/being": {

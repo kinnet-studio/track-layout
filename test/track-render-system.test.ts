@@ -1,10 +1,11 @@
 import { BCurve } from '@ue-too/curve';
 import { describe, expect, it } from 'bun:test';
-import type { Container, Graphics } from 'pixi.js';
+import { type Container, type Graphics, Texture } from 'pixi.js';
 
 import {
     TrackRenderSystem,
     type TrackRenderSystemOptions,
+    type TrackTextureRenderer,
 } from '../src/pixi/track-render-system.js';
 import type { TerrainSampler } from '../src/pixi/tunnel-geometry.js';
 import { TrackGraph } from '../src/tracks/track.js';
@@ -365,5 +366,106 @@ describe('TrackRenderSystem: cleanup', () => {
         expect(host.bedKeys).toEqual([]);
         expect(host.shadowKeys).toEqual([]);
         expect(host.overlays).toEqual([]);
+    });
+
+    it('destroys every texture it generated, tunnel and cutting textures included', () => {
+        const generated: Texture[] = [];
+        const recording: TrackTextureRenderer = {
+            renderer: {
+                textureGenerator: {
+                    generateTexture: () => {
+                        const texture = new Texture();
+                        generated.push(texture);
+                        return texture;
+                    },
+                },
+            },
+        };
+        const { host, graph, renderer } = scene({
+            textureRenderer: recording,
+            terrain: flatTerrain(5),
+        });
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layTrack(
+            graph,
+            [
+                { x: 0, y: 50 },
+                { x: 100, y: 50 },
+            ],
+            ELEVATION.SUB_1
+        );
+        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+        expect(host.bandKeys).toContain(`__tunnel_wall__${KEY}`);
+        expect(host.bandKeys).toContain(`__cutting__${drawKey(1)}`);
+
+        renderer.cleanup();
+
+        expect(generated.length).toBeGreaterThan(0);
+        expect(generated.filter(texture => !texture.destroyed).length).toBe(0);
+    });
+});
+
+describe('TrackRenderSystem: track that exists when it is built', () => {
+    /** Lays two elevated, bedded, electrified segments and a ramp into `graph`. */
+    function layLayout(graph: TrackGraph) {
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+    }
+
+    /** A renderer built over a graph that already holds the layout. */
+    function builtAfterLaying() {
+        const host = new RecordingLayerHost();
+        const graph = new TrackGraph();
+        layLayout(graph);
+        const cam = camera();
+        const renderer = new TrackRenderSystem(
+            host,
+            graph.trackCurveManager,
+            cam,
+            { textureRenderer }
+        );
+        return { host, graph, camera: cam, renderer };
+    }
+
+    it('draws the same pieces as a renderer built before the track was laid', () => {
+        const before = scene();
+        layLayout(before.graph);
+
+        const after = builtAfterLaying();
+
+        expect(after.host.bandKeys.length).toBeGreaterThan(0);
+        expect(after.host.bandKeys).toEqual(before.host.bandKeys);
+        expect(after.host.bedKeys).toEqual(before.host.bedKeys);
+        expect(after.host.shadowKeys).toEqual(before.host.shadowKeys);
+        for (const key of after.host.bandKeys) {
+            expect(after.host.bandOf(key)).toBe(before.host.bandOf(key));
+        }
+    });
+
+    it('shows existing track at the zoom level it is built at', async () => {
+        const { host, camera } = builtAfterLaying();
+
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+        expect(host.bandItem(KEY)!.visible).toBe(false);
+
+        await zoomTo(camera, 5);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(false);
+        expect(host.bandItem(KEY)!.visible).toBe(true);
+    });
+
+    it('removes existing track when the graph deletes it', () => {
+        const { host, graph } = builtAfterLaying();
+
+        graph.removeTrackSegment(0);
+
+        expect(
+            host.bandKeys.filter(
+                key =>
+                    key.includes('"trackSegmentNumber":0,') ||
+                    key === '__simplified__0'
+            )
+        ).toEqual([]);
+        expect(host.bedElevationOf(KEY)).toBeUndefined();
     });
 });
