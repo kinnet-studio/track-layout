@@ -3,6 +3,7 @@ import type { Graphics } from 'pixi.js';
 
 import { TrackAlignedPlatformRenderSystem } from '../src/pixi/track-aligned-platform-render-system.js';
 import type { TrackTextureRenderer } from '../src/pixi/track-render-system.js';
+import { StationManager } from '../src/stations/station-manager.js';
 import { TrackAlignedPlatformManager } from '../src/stations/track-aligned-platform-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
 import { RecordingLayerHost, textureRenderer } from './pixi-helpers.js';
@@ -36,6 +37,7 @@ function scene(texture: TrackTextureRenderer | null = textureRenderer) {
     const renderer = new TrackAlignedPlatformRenderSystem(
         host,
         platforms,
+        new StationManager(),
         graph,
         texture
     );

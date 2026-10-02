@@ -48,7 +48,13 @@ export class StationRenderSystem implements StationPlacementPreview {
 
     private _records: Map<number, StationRenderRecord> = new Map();
     private _platformTexture: Texture | null = null;
+    private _abortController = new AbortController();
 
+    /**
+     * Draws each station the manager creates from now on, and removes each
+     * one it destroys. Stations that already exist are drawn with
+     * {@link addStation}.
+     */
     constructor(
         worldRenderSystem: LayerHost,
         stationManager: StationManager,
@@ -59,6 +65,10 @@ export class StationRenderSystem implements StationPlacementPreview {
         this._stationManager = stationManager;
         this._trackGraph = trackGraph;
         this._textureRenderer = textureRenderer ?? null;
+
+        const options = { signal: this._abortController.signal };
+        stationManager.onStationAdded(id => this.addStation(id), options);
+        stationManager.onStationRemoved(id => this.removeStation(id), options);
     }
 
     // ---------------------------------------------------------------------------
@@ -108,6 +118,7 @@ export class StationRenderSystem implements StationPlacementPreview {
     }
 
     cleanup(): void {
+        this._abortController.abort();
         for (const [id] of this._records) {
             this.removeStation(id);
         }

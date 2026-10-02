@@ -2,6 +2,7 @@ import type { Point } from '@ue-too/math';
 import { Container, Graphics, MeshSimple, Texture } from 'pixi.js';
 
 import { LEVEL_HEIGHT } from '../index.js';
+import type { StationManager } from '../index.js';
 import type { TrackGraph } from '../index.js';
 import { sampleSpineEdge } from '../index.js';
 import type { TrackAlignedPlatformManager } from '../index.js';
@@ -128,26 +129,54 @@ export class TrackAlignedPlatformRenderSystem
 {
     private _worldRenderSystem: LayerHost;
     private _platformManager: TrackAlignedPlatformManager;
+    private _stationManager: StationManager;
     private _trackGraph: TrackGraph;
     private _textureRenderer: TrackTextureRenderer | null;
 
     private _records: Map<number, TrackAlignedPlatformRenderRecord> = new Map();
     private _platformTexture: Texture | null = null;
+    private _abortController = new AbortController();
 
     // Preview graphics for placement tools
     private _previewGraphics: Graphics | null = null;
     private _previewKey = 'track-aligned-platform-preview';
 
+    /**
+     * Draws each platform the manager creates from now on, at its station's
+     * elevation, and removes each one it destroys. Platforms that already
+     * exist are drawn with {@link addPlatform}.
+     */
     constructor(
         worldRenderSystem: LayerHost,
         platformManager: TrackAlignedPlatformManager,
+        stationManager: StationManager,
         trackGraph: TrackGraph,
         textureRenderer?: TrackTextureRenderer | null
     ) {
         this._worldRenderSystem = worldRenderSystem;
         this._platformManager = platformManager;
+        this._stationManager = stationManager;
         this._trackGraph = trackGraph;
         this._textureRenderer = textureRenderer ?? null;
+
+        const options = { signal: this._abortController.signal };
+        platformManager.onPlatformAdded(
+            id => this.addPlatform(id, this._stationElevation(id)),
+            options
+        );
+        platformManager.onPlatformRemoved(
+            id => this.removePlatform(id),
+            options
+        );
+    }
+
+    /** The elevation of a platform's station, or 0 when either is missing. */
+    private _stationElevation(platformId: number): number {
+        const platform = this._platformManager.getPlatform(platformId);
+        if (platform === null) return 0;
+        return (
+            this._stationManager.getStation(platform.stationId)?.elevation ?? 0
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -456,6 +485,7 @@ export class TrackAlignedPlatformRenderSystem
     }
 
     cleanup(): void {
+        this._abortController.abort();
         this.hidePreview();
         for (const [id] of this._records) {
             this.removePlatform(id);
