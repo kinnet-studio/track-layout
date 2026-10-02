@@ -88,10 +88,15 @@ export type TrackTextureRenderer = {
 
 /**
  * What a {@link TrackRenderSystem} draws besides the laid track. Every field
- * is optional: a renderer given none draws the track graph and nothing else.
+ * is optional, but see `textureRenderer`: without it track is only a line.
  */
 export type TrackRenderSystemOptions = {
-    /** Generates the rail, ballast and bed textures; without it those meshes are skipped. */
+    /**
+     * Generates the textures for ballast, rails, beds, shadows, tunnels and
+     * cuttings. Without it only the zoomed-out line is drawn, and from zoom
+     * level 5 up the line is hidden, so track disappears (apart from
+     * catenary poles). Pass one in any app that draws for people.
+     */
     textureRenderer?: TrackTextureRenderer | null;
     /** Terrain heights; without it the ground is flat at height 0. */
     terrain?: TerrainSampler | null;
@@ -100,6 +105,11 @@ export type TrackRenderSystemOptions = {
     catenaryLayout?: CatenaryLayoutPreviewSource;
 };
 
+/**
+ * Draws track into a {@link LayerHost} as the track curve manager adds and
+ * removes it. It can't draw track that already exists, so build it before
+ * laying or loading any track.
+ */
 export class TrackRenderSystem {
     private _worldRenderSystem: LayerHost;
     private _simplifiedTrack: Container;

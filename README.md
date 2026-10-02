@@ -137,20 +137,34 @@ optional peer `pixi.js` at `8.20.1`, but not `@ue-too/being`.
   its `container` to your stage under the camera transform. Draw your own
   elevation-ordered content (trains, buildings) into the same host so it
   interleaves with track.
-- **Track.** `TrackRenderSystem` draws the track graph. Its options are all
-  optional:
+- **Track.** `TrackRenderSystem` draws track as the graph adds and removes
+  it, so build it before laying or loading any track: it can't draw track
+  that already exists. Its options are all optional:
     - `textureRenderer`, such as `{ renderer: app.renderer }`. Without it
-      there are no rails, ballast textures or shadows.
+      only the zoomed-out line is drawn, and that is hidden from zoom level
+      5 up: zoomed-in track (ballast, rails, beds, shadows, tunnels and
+      cuttings) isn't drawn, and neither are stations or platforms
+      (catenary poles still are). Apps that draw for people should always
+      pass one.
     - `terrain`, anything with `getHeight(x, y)`. Without it the ground is
-      flat at height 0, so track below ground level is drawn in a tunnel.
+      flat at height 0, so track below ground level is drawn in a tunnel
+      (given a `textureRenderer`).
     - `curveCreation`, `duplicateToSide` and `catenaryLayout`: the engines
       from `track-layout/editing`, whose previews and highlights it draws.
 - **Stations and platforms** are drawn as the managers create them and
   removed as they destroy them. Build the renderers before loading a
-  scene, or draw what already exists with `addStation` and `addPlatform`.
-  Both renderers also implement the station placement previews.
+  scene, or draw what already exists with `addStation(id)` and
+  `addPlatform(id, elevation)`, where `elevation` is the elevation level of
+  the platform's station. Both renderers also implement the station
+  placement previews.
+- **Joint directions.**
+  `new JointDirectionRenderSystem(host, trackGraph, preferenceMap, camera)`
+  draws its indicators while the joint-direction tool is shown: call
+  `show()` when the tool activates and `hide()` when it deactivates.
 - Each renderer's `cleanup()` removes what it drew and stops listening
-  (`dispose()` for `JointDirectionRenderSystem`).
+  (`dispose()` for `JointDirectionRenderSystem`). `StationRenderSystem`'s
+  `cleanup()` leaves its placement preview, so call `hidePreview()` first
+  if one is showing.
 
 ```ts
 import { DefaultBoardCamera } from '@ue-too/board';

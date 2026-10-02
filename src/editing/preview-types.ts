@@ -3,7 +3,8 @@ import type { Point } from '@ue-too/math';
 import type { TrackSegmentDrawData } from '../index.js';
 
 /**
- * Draw data for the track a tool is previewing, one entry per piece.
+ * Draw data for the track a tool is previewing, one entry per piece. The
+ * observers of a preview source receive `PreviewDrawData | undefined`, where
  * `undefined` clears the preview.
  */
 export type PreviewDrawData = {

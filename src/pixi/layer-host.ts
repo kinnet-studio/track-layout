@@ -8,12 +8,16 @@ import type { BandSublayer } from './world-render-system.js';
  * per elevation level, and each band has sublayers that fix the draw order
  * within it.
  *
- * {@link WorldRenderSystem} is the default implementation. An app whose own
+ * `WorldRenderSystem` is the default implementation. An app whose own
  * content (trains, buildings) must interleave with track by elevation draws
  * it into the same host.
  */
 export interface LayerHost {
-    /** Adds a container to a band's sublayer, or moves it there if the key exists. */
+    /**
+     * Adds a container to a band's sublayer. If the key exists, passing the
+     * same container again moves it there; re-adding a key with a different
+     * container is not supported.
+     */
     addToBand(
         key: string,
         container: Container,

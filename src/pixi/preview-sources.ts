@@ -9,7 +9,11 @@ import type {
 } from '../editing/preview-types.js';
 import type { ProjectionPositiveResult } from '../index.js';
 
-/** Subscribes an observer to one stream of preview payloads. */
+/**
+ * Subscribes an observer to one stream of preview payloads. The track
+ * renderer passes `options.signal` and relies on it to unsubscribe when its
+ * `cleanup()` runs, so a source must honour it.
+ */
 type Subscribe<T> = (
     observer: Observer<[T]>,
     options?: SubscriptionOptions
