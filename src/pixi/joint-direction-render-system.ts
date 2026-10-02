@@ -8,7 +8,7 @@ import { Container, Graphics } from 'pixi.js';
 import { JointDirectionPreferenceMap } from '../index.js';
 import type { DirectionType } from '../index.js';
 import type { TrackGraph } from '../index.js';
-import { WorldRenderSystem } from './world-render-system.js';
+import type { LayerHost } from './layer-host.js';
 
 /** Base radius for the hover dot (world units); effective size = this / zoomLevel. */
 const HOVER_DOT_RADIUS = 8;
@@ -59,7 +59,7 @@ const ARROWHEAD_HALF_WIDTH = 7;
  * All indicators scale with 1/zoomLevel to remain constant screen size.
  */
 export class JointDirectionRenderSystem {
-    private _worldRenderSystem: WorldRenderSystem;
+    private _worldRenderSystem: LayerHost;
     private _trackGraph: TrackGraph;
     private _preferenceMap: JointDirectionPreferenceMap;
     private _camera: ObservableBoardCamera;
@@ -74,7 +74,7 @@ export class JointDirectionRenderSystem {
     private _abortController = new AbortController();
 
     constructor(
-        worldRenderSystem: WorldRenderSystem,
+        worldRenderSystem: LayerHost,
         trackGraph: TrackGraph,
         preferenceMap: JointDirectionPreferenceMap,
         camera: ObservableBoardCamera

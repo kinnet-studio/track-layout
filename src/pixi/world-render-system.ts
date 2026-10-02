@@ -2,6 +2,7 @@ import { Container } from 'pixi.js';
 
 import { LEVEL_HEIGHT } from '../index.js';
 import { ELEVATION, ELEVATION_VALUES } from '../index.js';
+import type { LayerHost } from './layer-host.js';
 
 const getElevationIndex = (elevation: ELEVATION): number => {
     const i = ELEVATION_VALUES.indexOf(elevation);
@@ -115,7 +116,7 @@ type ElevationBand = {
 const Z_INDEX_BELOW = 0;
 const Z_INDEX_OVERLAYS = 3;
 
-export class WorldRenderSystem {
+export class WorldRenderSystem implements LayerHost {
     private _mainContainer: Container;
     /** Contains all elevation band containers. */
     private _drawDataBelow: Container;

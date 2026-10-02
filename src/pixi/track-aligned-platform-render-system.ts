@@ -10,8 +10,8 @@ import type {
     DualSpinePlacementPreview,
     SingleSpinePlacementPreview,
 } from '../station-placement/index.js';
+import type { LayerHost } from './layer-host.js';
 import type { TrackTextureRenderer } from './track-render-system.js';
-import type { WorldRenderSystem } from './world-render-system.js';
 
 /** World-space length per one repeat of the platform texture (tiling). */
 const PLATFORM_TEXTURE_TILE_LEN = 2;
@@ -126,7 +126,7 @@ function seededRng(seed: number): () => number {
 export class TrackAlignedPlatformRenderSystem
     implements SingleSpinePlacementPreview, DualSpinePlacementPreview
 {
-    private _worldRenderSystem: WorldRenderSystem;
+    private _worldRenderSystem: LayerHost;
     private _platformManager: TrackAlignedPlatformManager;
     private _trackGraph: TrackGraph;
     private _textureRenderer: TrackTextureRenderer | null;
@@ -139,7 +139,7 @@ export class TrackAlignedPlatformRenderSystem
     private _previewKey = 'track-aligned-platform-preview';
 
     constructor(
-        worldRenderSystem: WorldRenderSystem,
+        worldRenderSystem: LayerHost,
         platformManager: TrackAlignedPlatformManager,
         trackGraph: TrackGraph,
         textureRenderer?: TrackTextureRenderer | null

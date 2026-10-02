@@ -7,8 +7,8 @@ import type { TrackGraph } from '../index.js';
 import type { StationManager } from '../index.js';
 import type { Platform } from '../index.js';
 import type { StationPlacementPreview } from '../station-placement/index.js';
+import type { LayerHost } from './layer-host.js';
 import type { TrackTextureRenderer } from './track-render-system.js';
-import type { WorldRenderSystem } from './world-render-system.js';
 
 /** World-space length per one repeat of the platform texture along the curve. */
 const PLATFORM_TEXTURE_TILE_LEN = 2;
@@ -41,7 +41,7 @@ function seededRng(seed: number): () => number {
 }
 
 export class StationRenderSystem implements StationPlacementPreview {
-    private _worldRenderSystem: WorldRenderSystem;
+    private _worldRenderSystem: LayerHost;
     private _stationManager: StationManager;
     private _trackGraph: TrackGraph;
     private _textureRenderer: TrackTextureRenderer | null;
@@ -50,7 +50,7 @@ export class StationRenderSystem implements StationPlacementPreview {
     private _platformTexture: Texture | null = null;
 
     constructor(
-        worldRenderSystem: WorldRenderSystem,
+        worldRenderSystem: LayerHost,
         stationManager: StationManager,
         trackGraph: TrackGraph,
         textureRenderer?: TrackTextureRenderer | null

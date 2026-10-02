@@ -7,4 +7,5 @@ export * from './duplicate-to-side-state-machine.js';
 export * from './joint-direction-state-machine.js';
 export * from './layout-kmt-state-machine.js';
 export * from './new-joint.js';
+export * from './preview-types.js';
 export * from './types.js';

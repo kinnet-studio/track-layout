@@ -13,19 +13,14 @@ import {
     ELEVATION,
     ProjectionPositiveResult,
     ProjectionResult,
-    TrackSegmentDrawData,
 } from '../index.js';
 import { LayoutContext } from './layout-kmt-state-machine.js';
 import { PreviewCurveCalculator, TENSION_STEP } from './new-joint.js';
+import type {
+    DeletionHighlightState,
+    PreviewDrawData,
+} from './preview-types.js';
 import { NewJointType } from './types.js';
-
-/**
- * Highlight payload for the curve deletion tool.
- * Non-null while the cursor is over a deletable segment.
- */
-export type DeletionHighlightState = {
-    segmentNumber: number;
-} | null;
 
 export class CurveCreationEngine implements LayoutContext {
     private _trackGraph: TrackGraph;
@@ -72,28 +67,8 @@ export class CurveCreationEngine implements LayoutContext {
         new SynchronousObservable<[number]>();
 
     private _previewDrawDataObservable: Observable<
-        [
-            | {
-                  index: number;
-                  drawData: TrackSegmentDrawData & {
-                      positiveOffsets: Point[];
-                      negativeOffsets: Point[];
-                  };
-              }[]
-            | undefined,
-        ]
-    > = new SynchronousObservable<
-        [
-            | {
-                  index: number;
-                  drawData: TrackSegmentDrawData & {
-                      positiveOffsets: Point[];
-                      negativeOffsets: Point[];
-                  };
-              }[]
-            | undefined,
-        ]
-    >();
+        [PreviewDrawData | undefined]
+    > = new SynchronousObservable<[PreviewDrawData | undefined]>();
 
     /**
      * @param trackGraph - The graph this engine edits. The app owns it.
@@ -459,18 +434,7 @@ export class CurveCreationEngine implements LayoutContext {
     }
 
     onPreviewDrawDataChange(
-        observer: Observer<
-            [
-                | {
-                      index: number;
-                      drawData: TrackSegmentDrawData & {
-                          positiveOffsets: Point[];
-                          negativeOffsets: Point[];
-                      };
-                  }[]
-                | undefined,
-            ]
-        >,
+        observer: Observer<[PreviewDrawData | undefined]>,
         options?: SubscriptionOptions
     ) {
         this._previewDrawDataObservable.subscribe(observer, options);

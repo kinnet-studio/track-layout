@@ -7,17 +7,12 @@ import { BCurve } from '@ue-too/curve';
 import { Point, PointCal } from '@ue-too/math';
 import { Container, Graphics, MeshSimple, Text, Texture } from 'pixi.js';
 
-import { CurveCreationEngine } from '../editing/index.js';
-import {
+import type {
     CatenaryHighlightState,
-    CatenaryLayoutEngine,
     CatenaryPreviewState,
-} from '../editing/index.js';
-import { DeletionHighlightState } from '../editing/index.js';
-import {
+    DeletionHighlightState,
     DuplicateHighlightState,
-    DuplicateToSideEngine,
-} from '../editing/index.js';
+} from '../editing/preview-types.js';
 import { LEVEL_HEIGHT } from '../index.js';
 import { TrackCurveManager } from '../index.js';
 import {
@@ -31,14 +26,17 @@ import {
 } from '../index.js';
 import type { SegmentStyleChange } from '../index.js';
 import { ballastHalfWidth } from './geometry-utils.js';
+import type { LayerHost } from './layer-host.js';
+import type {
+    CatenaryLayoutPreviewSource,
+    CurveCreationPreviewSource,
+    DuplicateToSidePreviewSource,
+} from './preview-sources.js';
 import {
     type TerrainSampler,
     computeTunnelEntranceGeometry,
 } from './tunnel-geometry.js';
-import {
-    WorldRenderSystem,
-    findElevationInterval,
-} from './world-render-system.js';
+import { findElevationInterval } from './world-render-system.js';
 
 /** Zoom level above which detailed track draw data is shown; below this only the bezier curve is drawn. */
 const ZOOM_THRESHOLD_DETAILED_TRACK = 5;
@@ -88,8 +86,22 @@ export type TrackTextureRenderer = {
     };
 };
 
+/**
+ * What a {@link TrackRenderSystem} draws besides the laid track. Every field
+ * is optional: a renderer given none draws the track graph and nothing else.
+ */
+export type TrackRenderSystemOptions = {
+    /** Generates the rail, ballast and bed textures; without it those meshes are skipped. */
+    textureRenderer?: TrackTextureRenderer | null;
+    /** Terrain heights; without it the ground is flat at height 0. */
+    terrain?: TerrainSampler | null;
+    curveCreation?: CurveCreationPreviewSource;
+    duplicateToSide?: DuplicateToSidePreviewSource;
+    catenaryLayout?: CatenaryLayoutPreviewSource;
+};
+
 export class TrackRenderSystem {
-    private _worldRenderSystem: WorldRenderSystem;
+    private _worldRenderSystem: LayerHost;
     private _simplifiedTrack: Container;
     private _topLevelContainer: Container;
     private _trackCurveManager: TrackCurveManager;
@@ -232,17 +244,14 @@ export class TrackRenderSystem {
     private _terrainData: TerrainSampler | null = null;
 
     constructor(
-        worldRenderSystem: WorldRenderSystem,
+        worldRenderSystem: LayerHost,
         trackCurveManager: TrackCurveManager,
-        curveCreationEngine: CurveCreationEngine,
         camera: ObservableBoardCamera,
-        textureRenderer?: TrackTextureRenderer | null,
-        terrainData?: TerrainSampler | null,
-        duplicateToSideEngine?: DuplicateToSideEngine,
-        catenaryLayoutEngine?: CatenaryLayoutEngine
+        options: TrackRenderSystemOptions = {}
     ) {
+        const { curveCreation, duplicateToSide, catenaryLayout } = options;
         this._worldRenderSystem = worldRenderSystem;
-        this._terrainData = terrainData ?? null;
+        this._terrainData = options.terrain ?? null;
         this._topLevelContainer = new Container();
         this._simplifiedTrack = new Container();
 
@@ -257,30 +266,32 @@ export class TrackRenderSystem {
         this._trackCurveManager.onAdd(this._onNewTrackData.bind(this), {
             signal: this._abortController.signal,
         });
-        curveCreationEngine.onPreviewDrawDataChange(
-            this._onPreviewDrawDataChange.bind(this),
-            { signal: this._abortController.signal }
-        );
-        curveCreationEngine.onDeletionHighlightChange(
-            this._onDeletionHighlightChange.bind(this),
-            { signal: this._abortController.signal }
-        );
-        if (duplicateToSideEngine) {
-            duplicateToSideEngine.onPreviewDrawDataChange(
+        if (curveCreation) {
+            curveCreation.onPreviewDrawDataChange(
                 this._onPreviewDrawDataChange.bind(this),
                 { signal: this._abortController.signal }
             );
-            duplicateToSideEngine.onHighlightChange(
+            curveCreation.onDeletionHighlightChange(
+                this._onDeletionHighlightChange.bind(this),
+                { signal: this._abortController.signal }
+            );
+        }
+        if (duplicateToSide) {
+            duplicateToSide.onPreviewDrawDataChange(
+                this._onPreviewDrawDataChange.bind(this),
+                { signal: this._abortController.signal }
+            );
+            duplicateToSide.onHighlightChange(
                 this._onDuplicateHighlightChange.bind(this),
                 { signal: this._abortController.signal }
             );
         }
-        if (catenaryLayoutEngine) {
-            catenaryLayoutEngine.onHighlightChange(
+        if (catenaryLayout) {
+            catenaryLayout.onHighlightChange(
                 this._onCatenaryHighlightChange.bind(this),
                 { signal: this._abortController.signal }
             );
-            catenaryLayoutEngine.onPreviewChange(
+            catenaryLayout.onPreviewChange(
                 this._onCatenaryPreviewChange.bind(this),
                 { signal: this._abortController.signal }
             );
@@ -302,7 +313,7 @@ export class TrackRenderSystem {
         this._previewStartProjection.fill({ color: 0xffffff });
         this._topLevelContainer.addChild(this._previewStartProjection);
 
-        curveCreationEngine.onPreviewStartProjectionChange(
+        curveCreation?.onPreviewStartProjectionChange(
             this._onPreviewStartChange.bind(this),
             { signal: this._abortController.signal }
         );
@@ -315,7 +326,7 @@ export class TrackRenderSystem {
         this._previewEndProjection.fill({ color: 0xffffff });
         this._topLevelContainer.addChild(this._previewEndProjection);
 
-        curveCreationEngine.onPreviewEndProjectionChange(
+        curveCreation?.onPreviewEndProjectionChange(
             this._onPreviewEndChange.bind(this),
             { signal: this._abortController.signal }
         );
@@ -334,7 +345,7 @@ export class TrackRenderSystem {
         );
 
         this._camera = camera;
-        this._textureRenderer = textureRenderer ?? null;
+        this._textureRenderer = options.textureRenderer ?? null;
 
         this._camera.on('zoom', this._onZoom.bind(this), {
             signal: this._abortController.signal,

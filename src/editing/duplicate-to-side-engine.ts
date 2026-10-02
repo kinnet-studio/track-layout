@@ -9,31 +9,13 @@ import type { Point } from '@ue-too/math';
 
 import { computeParallelSpacing } from '../index.js';
 import { TrackGraph } from '../index.js';
-import {
-    ELEVATION,
-    TrackSegmentDrawData,
-    TrackSegmentWithElevation,
-} from '../index.js';
+import { ELEVATION, TrackSegmentWithElevation } from '../index.js';
 import { computeDuplicateGeometry } from './duplicate-geometry.js';
 import { DuplicateToSideContext } from './duplicate-to-side-state-machine.js';
-
-type PreviewDrawData = {
-    index: number;
-    drawData: TrackSegmentDrawData & {
-        positiveOffsets: Point[];
-        negativeOffsets: Point[];
-    };
-}[];
-
-/**
- * Highlight payload for the duplicate-to-side tool.
- * `hover` = candidate under the cursor while no source is selected.
- * `selected` = the currently locked-in source while a preview is shown.
- */
-export type DuplicateHighlightState = {
-    segmentNumber: number;
-    kind: 'hover' | 'selected';
-} | null;
+import type {
+    DuplicateHighlightState,
+    PreviewDrawData,
+} from './preview-types.js';
 
 export class DuplicateToSideEngine implements DuplicateToSideContext {
     private _trackGraph: TrackGraph;
