@@ -1,6 +1,6 @@
 {
     "name": "track-layout",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "Railway track layout model: a Bezier track graph with junctions and elevation, stations and platforms, and save/load.",
     "license": "MIT",
     "repository": {
