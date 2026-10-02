@@ -1,0 +1,369 @@
+import { BCurve } from '@ue-too/curve';
+import { describe, expect, it } from 'bun:test';
+import type { Container, Graphics } from 'pixi.js';
+
+import {
+    TrackRenderSystem,
+    type TrackRenderSystemOptions,
+} from '../src/pixi/track-render-system.js';
+import type { TerrainSampler } from '../src/pixi/tunnel-geometry.js';
+import { TrackGraph } from '../src/tracks/track.js';
+import { ELEVATION } from '../src/tracks/types.js';
+import {
+    RecordingLayerHost,
+    camera,
+    drawKey,
+    fakeCatenaryLayoutSource,
+    fakeCurveCreationSource,
+    fakeDuplicateToSideSource,
+    textureRenderer,
+    zoomTo,
+} from './pixi-helpers.js';
+import { layTrack } from './station-placement-helpers.js';
+
+const A = { x: 0, y: 0 };
+const B = { x: 100, y: 0 };
+const C = { x: 200, y: 0 };
+const KEY = drawKey(0);
+
+/** A renderer on a fresh graph, with the texture stub unless options say otherwise. */
+function scene(options: TrackRenderSystemOptions = {}) {
+    const host = new RecordingLayerHost();
+    const graph = new TrackGraph();
+    const cam = camera();
+    const renderer = new TrackRenderSystem(host, graph.trackCurveManager, cam, {
+        textureRenderer,
+        ...options,
+    });
+    return { host, graph, camera: cam, renderer };
+}
+
+/** Lays one straight segment from A to B, ramping from `from` to `to`. */
+function layRamp(graph: TrackGraph, from: ELEVATION, to: ELEVATION) {
+    const start = graph.createNewEmptyJoint(A, { x: 1, y: 0 }, from);
+    const end = graph.createNewEmptyJoint(B, { x: 1, y: 0 }, to);
+    graph.connectJoints(start, end, [{ x: 50, y: 0 }]);
+}
+
+/** Terrain at one height everywhere. */
+const flatTerrain = (height: number): TerrainSampler => ({
+    getHeight: () => height,
+});
+
+/** The overlay that holds the highlights and the projection dots. */
+function topOverlay(host: RecordingLayerHost): Container {
+    return host.overlays[0]!;
+}
+
+/** Whether a graphics object has anything drawn in it. */
+function drawn(graphics: Container | undefined): boolean {
+    return (graphics as Graphics).context.instructions.length > 0;
+}
+
+describe('TrackRenderSystem: laid track', () => {
+    it('draws ground track in the ground band, with no shadow or bed', () => {
+        const { host, graph } = scene();
+
+        layTrack(graph, [A, B]);
+
+        expect(host.bandKeys).toEqual([
+            `__rail__${KEY}`,
+            '__simplified__0',
+            KEY,
+        ]);
+        expect(host.sublayerOf(KEY)).toBe('drawable');
+        expect(host.sublayerOf(`__rail__${KEY}`)).toBe('rail');
+        expect(host.sublayerOf('__simplified__0')).toBe('rail');
+        expect(host.bandOf(KEY)).toBe(3);
+        expect(host.shadowKeys).toEqual([]);
+        expect(host.bedKeys).toEqual([]);
+    });
+
+    it('draws elevated track in its band and its shadow one level below', () => {
+        const { host, graph } = scene();
+
+        layTrack(graph, [A, B], ELEVATION.ABOVE_2);
+
+        expect(host.bandOf(KEY)).toBe(5);
+        expect(host.bandOf(`__rail__${KEY}`)).toBe(5);
+        expect(host.shadowElevationOf(KEY)).toBe(ELEVATION.ABOVE_1);
+    });
+
+    it('draws a ramp in the band of its higher end', () => {
+        const { host, graph } = scene();
+
+        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+
+        expect(host.bandOf(KEY)).toBe(4);
+        expect(host.shadowElevationOf(KEY)).toBe(ELEVATION.GROUND);
+    });
+
+    it('draws a bed at the track level and catenary in the catenary sublayer', () => {
+        const { host, graph } = scene();
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        expect(host.bedElevationOf(KEY)).toBe(ELEVATION.ABOVE_1);
+        expect(host.sublayerOf(`__catenary__${KEY}`)).toBe('catenary');
+        expect(host.bandOf(`__catenary__${KEY}`)).toBe(4);
+    });
+
+    it('draws no rails or shadows without a texture renderer', () => {
+        const { host, graph } = scene({ textureRenderer: null });
+
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        expect(host.bandKeys).toEqual(['__simplified__0', KEY]);
+        expect(host.shadowKeys).toEqual([]);
+    });
+
+    it('removes everything a deleted segment registered', () => {
+        const { host, graph } = scene();
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        const { segments } = layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+
+        graph.removeTrackSegment(segments[0]!);
+
+        const other = drawKey(1);
+        expect(host.bandKeys).toEqual([
+            `__catenary__${other}`,
+            `__rail__${other}`,
+            '__simplified__1',
+            other,
+        ]);
+        expect(host.bedKeys).toEqual([other]);
+        expect(host.shadowKeys).toEqual([other]);
+    });
+
+    it('reports the band of a draw-data piece, or null for an unknown one', () => {
+        const { renderer, graph } = scene();
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        expect(
+            renderer.getTrackBandIndex({
+                trackSegmentNumber: 0,
+                tValInterval: { start: 0, end: 1 },
+            })
+        ).toBe(4);
+        expect(
+            renderer.getTrackBandIndex({
+                trackSegmentNumber: 7,
+                tValInterval: { start: 0, end: 1 },
+            })
+        ).toBeNull();
+    });
+});
+
+describe('TrackRenderSystem: display settings', () => {
+    it('shows the simplified track below zoom 5 and the detailed track from 5', async () => {
+        const { host, graph, camera } = scene();
+        graph.setNewSegmentStyle({ bed: true });
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        const detailed = () => [
+            host.bandItem(KEY)!.visible,
+            host.bandItem(`__rail__${KEY}`)!.visible,
+            host.shadow(KEY)!.visible,
+        ];
+
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+        expect(detailed()).toEqual([false, false, false]);
+
+        await zoomTo(camera, 5);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(false);
+        expect(detailed()).toEqual([true, true, true]);
+
+        await zoomTo(camera, 4.9);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+    });
+
+    it('swaps solid and gradient ballast when the elevation gradient is toggled', () => {
+        const { host, graph, renderer } = scene();
+        layTrack(graph, [A, B]);
+        const ballast = host.bandItem(KEY)!.children[0]!;
+        const [gradient, solid] = ballast.children;
+
+        expect([gradient!.visible, solid!.visible]).toEqual([false, true]);
+        renderer.showElevationGradient = true;
+        expect([gradient!.visible, solid!.visible]).toEqual([true, false]);
+    });
+
+    it('moves a level shadow with the sun angle', () => {
+        const { host, graph, renderer } = scene();
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        const shadow = host.shadow(KEY)!;
+        const before = { x: shadow.position.x, y: shadow.position.y };
+
+        renderer.sunAngle = 90;
+
+        expect(renderer.sunAngle).toBe(90);
+        expect(before.x).toBeLessThan(0);
+        expect(shadow.position.x).toBeCloseTo(0);
+        expect(shadow.position.y).toBeCloseTo(-before.x * Math.SQRT2);
+    });
+});
+
+describe('TrackRenderSystem: terrain', () => {
+    it('treats missing terrain as flat ground, so track below ground is in a tunnel', () => {
+        const { host, graph } = scene();
+
+        layTrack(graph, [A, B], ELEVATION.SUB_1);
+
+        expect(host.sublayerOf(`__tunnel_wall__${KEY}`)).toBe('drawable');
+        expect(host.sublayerOf(`__tunnel_ceiling__${KEY}`)).toBe('catenary');
+        expect(host.bandOf(`__tunnel_wall__${KEY}`)).toBe(2);
+        expect(host.bandOf('__underground__0')).toBe(3);
+    });
+
+    it('puts ground-level track under higher terrain in a tunnel', () => {
+        const { host, graph } = scene({ terrain: flatTerrain(20) });
+
+        layTrack(graph, [A, B]);
+
+        expect(host.bandOf(`__tunnel_wall__${KEY}`)).toBe(3);
+        expect(host.bandOf('__underground__0')).toBe(5);
+    });
+
+    it('gives a ramp that crosses the terrain a cutting and a cover', () => {
+        const { host, graph } = scene({ terrain: flatTerrain(5) });
+
+        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+
+        expect(host.sublayerOf(`__cutting__${KEY}`)).toBe('drawable');
+        expect(host.sublayerOf(`__cutting_cover__${KEY}`)).toBe('catenary');
+    });
+
+    it('draws no tunnel for track above the terrain', () => {
+        const { host, graph } = scene({ terrain: flatTerrain(5) });
+
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        expect(host.bandKeys.filter(key => key.includes('tunnel'))).toEqual([]);
+    });
+});
+
+describe('TrackRenderSystem: previews and highlights', () => {
+    function previewData(graph: TrackGraph) {
+        return graph.trackCurveManager.getPreviewDrawData(
+            new BCurve([A, { x: 50, y: 0 }, B]),
+            ELEVATION.GROUND,
+            ELEVATION.GROUND
+        );
+    }
+
+    it('draws curve-tool preview track and clears it on undefined', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph } = scene({ curveCreation: curveCreation.source });
+
+        curveCreation.emit('onPreviewDrawDataChange', previewData(graph));
+        expect(host.bandKeys).toEqual(['__preview__0', '__preview_rail__0']);
+        expect(host.sublayerOf('__preview__0')).toBe('drawable');
+        expect(host.sublayerOf('__preview_rail__0')).toBe('rail');
+
+        curveCreation.emit('onPreviewDrawDataChange', undefined);
+        expect(host.bandKeys).toEqual([]);
+    });
+
+    it('replaces the previous preview rather than adding to it', () => {
+        const duplicateToSide = fakeDuplicateToSideSource();
+        const { host, graph } = scene({
+            duplicateToSide: duplicateToSide.source,
+        });
+
+        duplicateToSide.emit('onPreviewDrawDataChange', previewData(graph));
+        duplicateToSide.emit('onPreviewDrawDataChange', previewData(graph));
+
+        expect(host.bandKeys).toEqual(['__preview__0', '__preview_rail__0']);
+    });
+
+    it('shows and hides the projection dots', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph } = scene({ curveCreation: curveCreation.source });
+        layTrack(graph, [A, B]);
+        const projection = graph.project({ x: 30, y: 0 });
+        const [startDot, endDot] = topOverlay(host).children.slice(4);
+
+        expect([startDot!.visible, endDot!.visible]).toEqual([false, false]);
+        curveCreation.emit('onPreviewStartProjectionChange', projection);
+        curveCreation.emit('onPreviewEndProjectionChange', projection);
+        expect([startDot!.visible, endDot!.visible]).toEqual([true, true]);
+        expect(startDot!.position.x).toBeCloseTo(30);
+
+        curveCreation.emit('onPreviewStartProjectionChange', null);
+        expect(startDot!.visible).toBe(false);
+    });
+
+    it('draws each tool highlight on its own graphics and clears it on null', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const duplicateToSide = fakeDuplicateToSideSource();
+        const catenaryLayout = fakeCatenaryLayoutSource();
+        const { host, graph } = scene({
+            curveCreation: curveCreation.source,
+            duplicateToSide: duplicateToSide.source,
+            catenaryLayout: catenaryLayout.source,
+        });
+        layTrack(graph, [A, B]);
+        const [duplicate, deletion, catenary, catenaryPreview] =
+            topOverlay(host).children;
+
+        duplicateToSide.emit('onHighlightChange', {
+            segmentNumber: 0,
+            kind: 'hover',
+        });
+        curveCreation.emit('onDeletionHighlightChange', { segmentNumber: 0 });
+        catenaryLayout.emit('onHighlightChange', {
+            segmentNumber: 0,
+            kind: 'selected',
+        });
+        catenaryLayout.emit('onPreviewChange', { segmentNumber: 0, side: 1 });
+        expect(
+            [duplicate, deletion, catenary, catenaryPreview].map(drawn)
+        ).toEqual([true, true, true, true]);
+
+        duplicateToSide.emit('onHighlightChange', null);
+        curveCreation.emit('onDeletionHighlightChange', null);
+        catenaryLayout.emit('onHighlightChange', null);
+        catenaryLayout.emit('onPreviewChange', null);
+        expect(
+            [duplicate, deletion, catenary, catenaryPreview].map(drawn)
+        ).toEqual([false, false, false, false]);
+    });
+
+    it('draws no highlight for a segment that does not exist', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host } = scene({ curveCreation: curveCreation.source });
+
+        curveCreation.emit('onDeletionHighlightChange', { segmentNumber: 9 });
+
+        expect(drawn(topOverlay(host).children[1])).toBe(false);
+    });
+});
+
+describe('TrackRenderSystem: cleanup', () => {
+    it('removes everything it registered with the host', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+            terrain: flatTerrain(5),
+        });
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layRamp(graph, ELEVATION.SUB_1, ELEVATION.GROUND);
+        curveCreation.emit(
+            'onPreviewDrawDataChange',
+            graph.trackCurveManager.getPreviewDrawData(
+                new BCurve([C, { x: 250, y: 0 }, { x: 300, y: 0 }]),
+                ELEVATION.GROUND,
+                ELEVATION.GROUND
+            )
+        );
+        expect(host.bandKeys.length).toBeGreaterThan(0);
+
+        renderer.cleanup();
+
+        expect(host.bandKeys).toEqual([]);
+        expect(host.bedKeys).toEqual([]);
+        expect(host.shadowKeys).toEqual([]);
+        expect(host.overlays).toEqual([]);
+    });
+});

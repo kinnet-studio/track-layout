@@ -1,10 +1,8 @@
 import type { Point } from '@ue-too/math';
 import { describe, expect, it, spyOn } from 'bun:test';
 
-import {
-    CurveCreationEngine,
-    type DeletionHighlightState,
-} from '../src/editing/curve-engine.js';
+import { CurveCreationEngine } from '../src/editing/curve-engine.js';
+import type { DeletionHighlightState } from '../src/editing/preview-types.js';
 import { TrackGraph } from '../src/tracks/track.js';
 import { ELEVATION } from '../src/tracks/types.js';
 

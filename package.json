@@ -27,6 +27,11 @@
             "import": "./dist/station-placement/index.js",
             "default": "./dist/station-placement/index.js"
         },
+        "./pixi": {
+            "types": "./dist/pixi/index.d.ts",
+            "import": "./dist/pixi/index.js",
+            "default": "./dist/pixi/index.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [
@@ -45,10 +50,14 @@
         "@ue-too/being": "^0.19.0",
         "@ue-too/board": "^0.19.0",
         "@ue-too/curve": "^0.19.0",
-        "@ue-too/math": "^0.19.0"
+        "@ue-too/math": "^0.19.0",
+        "pixi.js": "8.20.1"
     },
     "peerDependenciesMeta": {
         "@ue-too/being": {
+            "optional": true
+        },
+        "pixi.js": {
             "optional": true
         }
     },
@@ -59,6 +68,7 @@
         "@ue-too/board": "0.19.0",
         "@ue-too/curve": "0.19.0",
         "@ue-too/math": "0.19.0",
+        "pixi.js": "8.20.1",
         "prettier": "^3.5.3",
         "typescript": "^5.8.0"
     }

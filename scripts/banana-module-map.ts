@@ -50,6 +50,15 @@ export const MODULE_MAP: Record<string, string> = {
         'src/station-placement/single-spine-placement-state-machine',
     'src/stations/dual-spine-placement-state-machine':
         'src/station-placement/dual-spine-placement-state-machine',
+    'src/world-render-system': 'src/pixi/world-render-system',
+    'src/trains/tracks/render-system': 'src/pixi/track-render-system',
+    'src/trains/tracks/geometry-utils': 'src/pixi/geometry-utils',
+    'src/trains/tracks/tunnel-geometry': 'src/pixi/tunnel-geometry',
+    'src/trains/tracks/joint-direction-render-system':
+        'src/pixi/joint-direction-render-system',
+    'src/stations/station-render-system': 'src/pixi/station-render-system',
+    'src/stations/track-aligned-platform-render-system':
+        'src/pixi/track-aligned-platform-render-system',
 };
 
 /**
@@ -60,6 +69,7 @@ export const PACKAGE_MAP: Record<string, string> = {
     'track-layout': 'src/index',
     'track-layout/editing': 'src/editing/index',
     'track-layout/station-placement': 'src/station-placement/index',
+    'track-layout/pixi': 'src/pixi/index',
 };
 
 /** The package entry point that exposes a track-layout module. */
@@ -68,5 +78,6 @@ export function entryPointFor(moduleId: string): string {
     if (moduleId.startsWith('src/station-placement/')) {
         return 'track-layout/station-placement';
     }
+    if (moduleId.startsWith('src/pixi/')) return 'track-layout/pixi';
     return 'track-layout';
 }

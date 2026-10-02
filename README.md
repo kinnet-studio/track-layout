@@ -126,6 +126,89 @@ tool.happens('startPlacement', { stationId });
 // track, add outer vertices, and click the start anchor to create it.
 ```
 
+## Drawing a layout with Pixi
+
+`track-layout/pixi` holds Pixi 8 renderers for track, stations,
+track-aligned platforms and joint-direction indicators. It needs the
+optional peer `pixi.js` at `8.20.1`, but not `@ue-too/being`.
+
+- **Layer host.** The renderers draw into a `LayerHost`, which orders
+  content by elevation band. `WorldRenderSystem` is the default one: add
+  its `container` to your stage under the camera transform. Draw your own
+  elevation-ordered content (trains, buildings) into the same host so it
+  interleaves with track.
+- **Track.** `TrackRenderSystem` draws track as the graph adds and removes
+  it, so build it before laying or loading any track: it can't draw track
+  that already exists. Its options are all optional:
+    - `textureRenderer`, such as `{ renderer: app.renderer }`. Without it
+      only the zoomed-out line is drawn, and that is hidden from zoom level
+      5 up: zoomed-in track (ballast, rails, beds, shadows, tunnels and
+      cuttings) isn't drawn, and neither are stations or platforms
+      (catenary poles still are). Apps that draw for people should always
+      pass one.
+    - `terrain`, anything with `getHeight(x, y)`. Without it the ground is
+      flat at height 0, so track below ground level is drawn in a tunnel
+      (given a `textureRenderer`).
+    - `curveCreation`, `duplicateToSide` and `catenaryLayout`: the engines
+      from `track-layout/editing`, whose previews and highlights it draws.
+- **Stations and platforms** are drawn as the managers create them and
+  removed as they destroy them. Build the renderers before loading a
+  scene, or draw what already exists with `addStation(id)` and
+  `addPlatform(id, elevation)`, where `elevation` is the elevation level of
+  the platform's station. Both renderers also implement the station
+  placement previews.
+- **Joint directions.**
+  `new JointDirectionRenderSystem(host, trackGraph, preferenceMap, camera)`
+  draws its indicators while the joint-direction tool is shown: call
+  `show()` when the tool activates and `hide()` when it deactivates.
+- Each renderer's `cleanup()` removes what it drew and stops listening
+  (`dispose()` for `JointDirectionRenderSystem`). `StationRenderSystem`'s
+  `cleanup()` leaves its placement preview, so call `hidePreview()` first
+  if one is showing.
+
+```ts
+import { DefaultBoardCamera } from '@ue-too/board';
+import { Application } from 'pixi.js';
+import {
+    StationManager,
+    TrackAlignedPlatformManager,
+    TrackGraph,
+} from 'track-layout';
+import { CurveCreationEngine } from 'track-layout/editing';
+import {
+    StationRenderSystem,
+    TrackAlignedPlatformRenderSystem,
+    TrackRenderSystem,
+    WorldRenderSystem,
+} from 'track-layout/pixi';
+
+const app = new Application();
+await app.init();
+const camera = new DefaultBoardCamera();
+const graph = new TrackGraph();
+const stations = new StationManager();
+const platforms = new TrackAlignedPlatformManager();
+// Replace with your camera's window-to-world conversion.
+const windowToWorld = (p: { x: number; y: number }) => p;
+
+const host = new WorldRenderSystem();
+app.stage.addChild(host.container); // apply the camera's transform to it
+const textureRenderer = { renderer: app.renderer };
+
+new TrackRenderSystem(host, graph.trackCurveManager, camera, {
+    textureRenderer,
+    curveCreation: new CurveCreationEngine(graph, windowToWorld),
+});
+new StationRenderSystem(host, stations, graph, textureRenderer);
+new TrackAlignedPlatformRenderSystem(
+    host,
+    platforms,
+    stations,
+    graph,
+    textureRenderer
+);
+```
+
 ## Development
 
 ```bash

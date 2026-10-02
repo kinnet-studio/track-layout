@@ -8,24 +8,10 @@ import type { Point } from '@ue-too/math';
 
 import { TrackGraph } from '../index.js';
 import { CatenaryLayoutContext } from './catenary-layout-state-machine.js';
-
-/**
- * Highlight payload for the catenary layout tool.
- * `hover` = candidate under the cursor while no source is selected.
- * `selected` = the currently locked-in source while a preview is shown.
- */
-export type CatenaryHighlightState = {
-    segmentNumber: number;
-    kind: 'hover' | 'selected';
-} | null;
-
-/**
- * Preview payload emitted while the user is choosing a side.
- */
-export type CatenaryPreviewState = {
-    segmentNumber: number;
-    side: 1 | -1;
-} | null;
+import type {
+    CatenaryHighlightState,
+    CatenaryPreviewState,
+} from './preview-types.js';
 
 export class CatenaryLayoutEngine implements CatenaryLayoutContext {
     private _trackGraph: TrackGraph;
