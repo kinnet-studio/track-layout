@@ -27,15 +27,30 @@ const RUNTIME_EXPORTS = [
 
 const SRC = join(import.meta.dir, '..', 'src');
 
-/** Every import statement in a source file: its specifier and whether it is type-only. */
+/**
+ * Every module a source file references, with whether the reference is
+ * type-only: `import ... from` and `export ... from` statements (including
+ * `export *`, multi-line clauses and either quote style), side-effect
+ * `import 'x'` and dynamic `import('x')` with a string literal. Only
+ * statements that start `import type` or `export type` count as type-only.
+ */
 function importsOf(file: string): { specifier: string; typeOnly: boolean }[] {
     const text = readFileSync(file, 'utf8');
-    return [
-        ...text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+'([^']+)';/gms),
+    const statements = [
+        ...text.matchAll(
+            /^(?:import|export)\s+(type\s+)?[\w\s{},*$]*?\bfrom\s*(['"])([^'"\n]+)\2/gm
+        ),
     ].map(match => ({
-        specifier: match[2]!,
+        specifier: match[3]!,
         typeOnly: match[1] !== undefined,
     }));
+    const sideEffects = [
+        ...text.matchAll(/^import\s*(['"])([^'"\n]+)\1/gm),
+    ].map(match => ({ specifier: match[2]!, typeOnly: false }));
+    const dynamic = [
+        ...text.matchAll(/\bimport\s*\(\s*(['"`])([^'"`\n]+)\1\s*\)/g),
+    ].map(match => ({ specifier: match[2]!, typeOnly: false }));
+    return [...statements, ...sideEffects, ...dynamic];
 }
 
 /** The modules outside src/pixi that src/pixi may import, all type-only. */
