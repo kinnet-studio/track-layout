@@ -130,16 +130,16 @@ tool.happens('startPlacement', { stationId });
 
 `track-layout/pixi` holds Pixi 8 renderers for track, stations,
 track-aligned platforms and joint-direction indicators. It needs the
-optional peer `pixi.js` at `8.20.1`, but not `@ue-too/being`.
+optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
 
 - **Layer host.** The renderers draw into a `LayerHost`, which orders
   content by elevation band. `WorldRenderSystem` is the default one: add
   its `container` to your stage under the camera transform. Draw your own
   elevation-ordered content (trains, buildings) into the same host so it
   interleaves with track.
-- **Track.** `TrackRenderSystem` draws track as the graph adds and removes
-  it, so build it before laying or loading any track: it can't draw track
-  that already exists. Its options are all optional:
+- **Track.** `TrackRenderSystem` draws the track the graph already holds
+  when it is built, then track as the graph adds and removes it. Its
+  options are all optional:
     - `textureRenderer`, such as `{ renderer: app.renderer }`. Without it
       only the zoomed-out line is drawn, and that is hidden from zoom level
       5 up: zoomed-in track (ballast, rails, beds, shadows, tunnels and
@@ -151,12 +151,11 @@ optional peer `pixi.js` at `8.20.1`, but not `@ue-too/being`.
       (given a `textureRenderer`).
     - `curveCreation`, `duplicateToSide` and `catenaryLayout`: the engines
       from `track-layout/editing`, whose previews and highlights it draws.
-- **Stations and platforms** are drawn as the managers create them and
-  removed as they destroy them. Build the renderers before loading a
-  scene, or draw what already exists with `addStation(id)` and
-  `addPlatform(id, elevation)`, where `elevation` is the elevation level of
-  the platform's station. Both renderers also implement the station
-  placement previews.
+- **Stations and platforms.** `StationRenderSystem` and
+  `TrackAlignedPlatformRenderSystem` draw the stations and platforms their
+  managers already hold when they are built, then draw and remove them as
+  the managers create and destroy them. Both renderers also implement the
+  station placement previews.
 - **Joint directions.**
   `new JointDirectionRenderSystem(host, trackGraph, preferenceMap, camera)`
   draws its indicators while the joint-direction tool is shown: call
