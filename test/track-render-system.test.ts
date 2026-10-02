@@ -1,10 +1,11 @@
 import { BCurve } from '@ue-too/curve';
 import { describe, expect, it } from 'bun:test';
-import type { Container, Graphics } from 'pixi.js';
+import { type Container, type Graphics, Texture } from 'pixi.js';
 
 import {
     TrackRenderSystem,
     type TrackRenderSystemOptions,
+    type TrackTextureRenderer,
 } from '../src/pixi/track-render-system.js';
 import type { TerrainSampler } from '../src/pixi/tunnel-geometry.js';
 import { TrackGraph } from '../src/tracks/track.js';
@@ -365,6 +366,42 @@ describe('TrackRenderSystem: cleanup', () => {
         expect(host.bedKeys).toEqual([]);
         expect(host.shadowKeys).toEqual([]);
         expect(host.overlays).toEqual([]);
+    });
+
+    it('destroys every texture it generated, tunnel and cutting textures included', () => {
+        const generated: Texture[] = [];
+        const recording: TrackTextureRenderer = {
+            renderer: {
+                textureGenerator: {
+                    generateTexture: () => {
+                        const texture = new Texture();
+                        generated.push(texture);
+                        return texture;
+                    },
+                },
+            },
+        };
+        const { host, graph, renderer } = scene({
+            textureRenderer: recording,
+            terrain: flatTerrain(5),
+        });
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layTrack(
+            graph,
+            [
+                { x: 0, y: 50 },
+                { x: 100, y: 50 },
+            ],
+            ELEVATION.SUB_1
+        );
+        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+        expect(host.bandKeys).toContain(`__tunnel_wall__${KEY}`);
+        expect(host.bandKeys).toContain(`__cutting__${drawKey(1)}`);
+
+        renderer.cleanup();
+
+        expect(generated.length).toBeGreaterThan(0);
+        expect(generated.filter(texture => !texture.destroyed).length).toBe(0);
     });
 });
 

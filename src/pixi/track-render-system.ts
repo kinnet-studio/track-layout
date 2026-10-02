@@ -739,6 +739,22 @@ export class TrackRenderSystem {
             this._bedTexture.destroy(true);
             this._bedTexture = null;
         }
+        if (this._tunnelWallTexture !== null) {
+            this._tunnelWallTexture.destroy(true);
+            this._tunnelWallTexture = null;
+        }
+        if (this._tunnelCeilingTexture !== null) {
+            this._tunnelCeilingTexture.destroy(true);
+            this._tunnelCeilingTexture = null;
+        }
+        if (this._cuttingWallTexture !== null) {
+            this._cuttingWallTexture.destroy(true);
+            this._cuttingWallTexture = null;
+        }
+        if (this._cuttingCoverTexture !== null) {
+            this._cuttingCoverTexture.destroy(true);
+            this._cuttingCoverTexture = null;
+        }
     }
 
     /**
