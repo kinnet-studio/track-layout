@@ -367,3 +367,68 @@ describe('TrackRenderSystem: cleanup', () => {
         expect(host.overlays).toEqual([]);
     });
 });
+
+describe('TrackRenderSystem: track that exists when it is built', () => {
+    /** Lays two elevated, bedded, electrified segments and a ramp into `graph`. */
+    function layLayout(graph: TrackGraph) {
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+    }
+
+    /** A renderer built over a graph that already holds the layout. */
+    function builtAfterLaying() {
+        const host = new RecordingLayerHost();
+        const graph = new TrackGraph();
+        layLayout(graph);
+        const cam = camera();
+        const renderer = new TrackRenderSystem(
+            host,
+            graph.trackCurveManager,
+            cam,
+            { textureRenderer }
+        );
+        return { host, graph, camera: cam, renderer };
+    }
+
+    it('draws the same pieces as a renderer built before the track was laid', () => {
+        const before = scene();
+        layLayout(before.graph);
+
+        const after = builtAfterLaying();
+
+        expect(after.host.bandKeys.length).toBeGreaterThan(0);
+        expect(after.host.bandKeys).toEqual(before.host.bandKeys);
+        expect(after.host.bedKeys).toEqual(before.host.bedKeys);
+        expect(after.host.shadowKeys).toEqual(before.host.shadowKeys);
+        for (const key of after.host.bandKeys) {
+            expect(after.host.bandOf(key)).toBe(before.host.bandOf(key));
+        }
+    });
+
+    it('shows existing track at the zoom level it is built at', async () => {
+        const { host, camera } = builtAfterLaying();
+
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+        expect(host.bandItem(KEY)!.visible).toBe(false);
+
+        await zoomTo(camera, 5);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(false);
+        expect(host.bandItem(KEY)!.visible).toBe(true);
+    });
+
+    it('removes existing track when the graph deletes it', () => {
+        const { host, graph } = builtAfterLaying();
+
+        graph.removeTrackSegment(0);
+
+        expect(
+            host.bandKeys.filter(
+                key =>
+                    key.includes('"trackSegmentNumber":0,') ||
+                    key === '__simplified__0'
+            )
+        ).toEqual([]);
+        expect(host.bedElevationOf(KEY)).toBeUndefined();
+    });
+});

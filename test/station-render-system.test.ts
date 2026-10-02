@@ -12,8 +12,8 @@ import { bareStation } from './station-placement-helpers.js';
 
 /**
  * A renderer over a graph that already holds an island station with two
- * platforms, centred on the origin. The station exists before the renderer,
- * so the tests draw it explicitly.
+ * platforms, centred on the origin. The renderer draws the station when it
+ * is built; the fixture removes it so each test draws it itself.
  */
 function scene(
     elevation = ELEVATION.GROUND,
@@ -29,6 +29,7 @@ function scene(
         elevation,
     });
     const renderer = new StationRenderSystem(host, stations, graph, texture);
+    renderer.removeStation(id);
     return { host, graph, stations, renderer, id };
 }
 
