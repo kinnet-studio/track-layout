@@ -7,7 +7,13 @@ import { createIslandStation } from '../src/stations/station-factory.js';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
 import { ELEVATION } from '../src/tracks/types.js';
-import { RecordingLayerHost, textureRenderer } from './pixi-helpers.js';
+import {
+    RecordingLayerHost,
+    type StrokedLine,
+    fillsAnything,
+    strokedLines,
+    textureRenderer,
+} from './pixi-helpers.js';
 import { bareStation } from './station-placement-helpers.js';
 
 /**
@@ -112,5 +118,64 @@ describe('StationRenderSystem', () => {
 
         expect(host.bandKeys).toEqual([]);
         expect(host.drawableKeys).toEqual(['station-preview']);
+    });
+});
+
+/** A line's extent as [minX, maxX, minY, maxY]. */
+function extent({ points }: StrokedLine): number[] {
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+}
+
+describe('StationRenderSystem: outline style', () => {
+    it("draws each of a station's platforms as its closed outline, unfilled", () => {
+        const { host, renderer, id } = scene();
+        renderer.renderStyle = 'outline';
+
+        renderer.addStation(id);
+
+        const station = host.bandItem(`station-${id}`);
+        const lines = strokedLines(station);
+        expect(lines.map(line => line.closed)).toEqual([true, true]);
+        expect(fillsAnything(station)).toBe(false);
+        // The two halves of the island, 4 m wide each side of the middle,
+        // 1.2 m from tracks 5.2 m either side of it.
+        const extents = lines.map(extent).sort((a, b) => a[2]! - b[2]!);
+        const expected = [
+            [-50, 50, -4, 0],
+            [-50, 50, 0, 4],
+        ];
+        for (const [i, values] of extents.entries()) {
+            for (const [j, value] of values.entries()) {
+                expect(value).toBeCloseTo(expected[i]![j]!);
+            }
+        }
+    });
+
+    it('draws the outlines without a texture renderer', () => {
+        const { host, renderer, id } = scene(ELEVATION.GROUND, null);
+        renderer.renderStyle = 'outline';
+
+        renderer.addStation(id);
+
+        expect(strokedLines(host.bandItem(`station-${id}`))).toHaveLength(2);
+    });
+
+    it('redraws its stations when the style changes', () => {
+        const { host, renderer, id } = scene(ELEVATION.ABOVE_1);
+        renderer.addStation(id);
+        const textured = host.bandItem(`station-${id}`)!;
+
+        renderer.renderStyle = 'outline';
+
+        expect(textured.destroyed).toBe(true);
+        expect(strokedLines(host.bandItem(`station-${id}`))).toHaveLength(2);
+        expect(host.bandOf(`station-${id}`)).toBe(4);
+
+        renderer.renderStyle = 'detailed';
+
+        expect(strokedLines(host.bandItem(`station-${id}`))).toHaveLength(0);
+        expect(host.bandItem(`station-${id}`)!.children).toHaveLength(2);
     });
 });

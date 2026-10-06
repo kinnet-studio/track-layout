@@ -1,4 +1,5 @@
 import { BCurve } from '@ue-too/curve';
+import type { Point } from '@ue-too/math';
 import { describe, expect, it } from 'bun:test';
 import { type Container, type Graphics, Texture } from 'pixi.js';
 
@@ -12,11 +13,14 @@ import { TrackGraph } from '../src/tracks/track.js';
 import { ELEVATION } from '../src/tracks/types.js';
 import {
     RecordingLayerHost,
+    type StrokedLine,
     camera,
     drawKey,
     fakeCatenaryLayoutSource,
     fakeCurveCreationSource,
     fakeDuplicateToSideSource,
+    strokedLines,
+    textsIn,
     textureRenderer,
     zoomTo,
 } from './pixi-helpers.js';
@@ -59,6 +63,18 @@ function topOverlay(host: RecordingLayerHost): Container {
 /** Whether a graphics object has anything drawn in it. */
 function drawn(graphics: Container | undefined): boolean {
     return (graphics as Graphics).context.instructions.length > 0;
+}
+
+/** What the curve tool previews for `curve`, laid at ground level. */
+function previewData(
+    graph: TrackGraph,
+    curve = new BCurve([A, { x: 50, y: 0 }, B])
+) {
+    return graph.trackCurveManager.getPreviewDrawData(
+        curve,
+        ELEVATION.GROUND,
+        ELEVATION.GROUND
+    );
 }
 
 describe('TrackRenderSystem: laid track', () => {
@@ -244,14 +260,6 @@ describe('TrackRenderSystem: terrain', () => {
 });
 
 describe('TrackRenderSystem: previews and highlights', () => {
-    function previewData(graph: TrackGraph) {
-        return graph.trackCurveManager.getPreviewDrawData(
-            new BCurve([A, { x: 50, y: 0 }, B]),
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
-        );
-    }
-
     it('draws curve-tool preview track and clears it on undefined', () => {
         const curveCreation = fakeCurveCreationSource();
         const { host, graph } = scene({ curveCreation: curveCreation.source });
@@ -467,5 +475,238 @@ describe('TrackRenderSystem: track that exists when it is built', () => {
             )
         ).toEqual([]);
         expect(host.bedElevationOf(KEY)).toBeUndefined();
+    });
+});
+
+/** Expects `line` to run from x = 0 to x = 100 at a constant `y`. */
+function expectStraightAlongX(line: StrokedLine, y: number) {
+    expect(line.points[0]!.x).toBeCloseTo(0);
+    expect(line.points.at(-1)!.x).toBeCloseTo(100);
+    for (const point of line.points) {
+        expect(point.y).toBeCloseTo(y);
+    }
+}
+
+/** The distance from `point` to the nearest of 4000 points along `curve`. */
+function distanceToCurve(point: Point, curve: BCurve): number {
+    let nearest = Infinity;
+    for (let i = 0; i <= 4000; i++) {
+        const onCurve = curve.get(i / 4000);
+        nearest = Math.min(
+            nearest,
+            Math.hypot(point.x - onCurve.x, point.y - onCurve.y)
+        );
+    }
+    return nearest;
+}
+
+describe('TrackRenderSystem: line styles', () => {
+    it('draws track as a line at every zoom level, and nothing else', async () => {
+        const { host, graph, camera, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        expect(host.bandKeys).toEqual(['__simplified__0']);
+        expect(host.bandOf('__simplified__0')).toBe(4);
+        expect(host.bedKeys).toEqual([]);
+        expect(host.shadowKeys).toEqual([]);
+        await zoomTo(camera, 10);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+    });
+
+    it('draws the centerline down the middle of the track', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        layTrack(graph, [A, B]);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines).toHaveLength(1);
+        expectStraightAlongX(lines[0]!, 0);
+    });
+
+    it("draws the rails the segment's gauge apart", () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'rails';
+        const start = graph.createNewEmptyJoint(A, { x: 1, y: 0 });
+        const end = graph.createNewEmptyJoint(B, { x: 1, y: 0 });
+
+        graph.connectJoints(start, end, [{ x: 50, y: 0 }], 1.435);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines).toHaveLength(2);
+        const [lower, upper] = [...lines].sort(
+            (a, b) => a.points[0]!.y - b.points[0]!.y
+        );
+        expectStraightAlongX(lower!, -0.7175);
+        expectStraightAlongX(upper!, 0.7175);
+    });
+
+    it('keeps each rail half the gauge from the middle around a curve', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'rails';
+        const corner = { x: 100, y: 0 };
+        const end = { x: 100, y: 100 };
+        const startJoint = graph.createNewEmptyJoint(A, { x: 1, y: 0 });
+        const endJoint = graph.createNewEmptyJoint(end, { x: 0, y: 1 });
+
+        graph.connectJoints(startJoint, endJoint, [corner]);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines).toHaveLength(2);
+        const curve = new BCurve([A, corner, end]);
+        for (const point of lines.flatMap(line => line.points)) {
+            expect(distanceToCurve(point, curve)).toBeCloseTo(1.067 / 2, 2);
+        }
+    });
+
+    it('draws lines without a texture renderer', async () => {
+        const { host, graph, camera, renderer } = scene({
+            textureRenderer: null,
+        });
+        renderer.renderStyle = 'rails';
+
+        layTrack(graph, [A, B]);
+        await zoomTo(camera, 10);
+
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(2);
+    });
+
+    it('keeps the dashed marker on underground track at every zoom level', async () => {
+        const { host, graph, camera, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        layTrack(graph, [A, B], ELEVATION.SUB_1);
+        await zoomTo(camera, 10);
+
+        expect(host.bandKeys).toEqual(['__simplified__0', '__underground__0']);
+        expect(host.bandItem('__underground__0')!.visible).toBe(true);
+    });
+
+    it('still reports the band of a draw-data piece', () => {
+        const { renderer, graph } = scene();
+        renderer.renderStyle = 'rails';
+
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        expect(
+            renderer.getTrackBandIndex({
+                trackSegmentNumber: 0,
+                tValInterval: { start: 0, end: 1 },
+            })
+        ).toBe(4);
+    });
+
+    it('draws nothing more when a segment is restyled', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        graph.setSegmentStyle(0, { bed: true, electrified: true });
+
+        expect(host.bandKeys).toEqual(['__simplified__0']);
+        expect(host.bedKeys).toEqual([]);
+    });
+
+    it('draws the preview as lines, without a tunnel', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+            terrain: flatTerrain(5),
+        });
+        renderer.renderStyle = 'rails';
+
+        curveCreation.emit('onPreviewDrawDataChange', previewData(graph));
+
+        expect(host.bandKeys).toEqual(['__preview__0']);
+        expect(strokedLines(host.bandItem('__preview__0'))).toHaveLength(2);
+    });
+
+    it('draws the preview curve arcs too', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+        });
+        renderer.renderStyle = 'centerline';
+        renderer.showPreviewCurveArcs = true;
+
+        curveCreation.emit(
+            'onPreviewDrawDataChange',
+            previewData(
+                graph,
+                new BCurve([A, { x: 100, y: 0 }, { x: 100, y: 100 }])
+            )
+        );
+
+        expect(
+            textsIn(host.bandItem('__preview__0')).some(text =>
+                text.startsWith('R ')
+            )
+        ).toBe(true);
+    });
+
+    it('redraws laid track when the style changes', async () => {
+        const { host, graph, camera, renderer } = scene();
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        const detailedKeys = host.bandKeys;
+        await zoomTo(camera, 5);
+
+        renderer.renderStyle = 'rails';
+
+        expect(host.bandKeys).toEqual(['__simplified__0']);
+        expect(host.bedKeys).toEqual([]);
+        expect(host.shadowKeys).toEqual([]);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(true);
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(2);
+
+        renderer.renderStyle = 'detailed';
+
+        expect(host.bandKeys).toEqual(detailedKeys);
+        expect(host.bedKeys).toEqual([KEY]);
+        expect(host.shadowKeys).toEqual([KEY]);
+        expect(host.bandItem(KEY)!.visible).toBe(true);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(false);
+    });
+
+    it('redraws the current preview when the style changes', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+        });
+        curveCreation.emit('onPreviewDrawDataChange', previewData(graph));
+
+        renderer.renderStyle = 'centerline';
+
+        expect(host.bandKeys).toEqual(['__preview__0']);
+        expect(strokedLines(host.bandItem('__preview__0'))).toHaveLength(1);
+
+        renderer.renderStyle = 'detailed';
+
+        expect(host.bandKeys).toEqual(['__preview__0', '__preview_rail__0']);
+    });
+
+    it('removes its lines on cleanup', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+        });
+        renderer.renderStyle = 'rails';
+        layTrack(graph, [A, B], ELEVATION.SUB_1);
+        curveCreation.emit(
+            'onPreviewDrawDataChange',
+            previewData(
+                graph,
+                new BCurve([C, { x: 250, y: 0 }, { x: 300, y: 0 }])
+            )
+        );
+        expect(host.bandKeys.length).toBeGreaterThan(0);
+
+        renderer.cleanup();
+
+        expect(host.bandKeys).toEqual([]);
     });
 });

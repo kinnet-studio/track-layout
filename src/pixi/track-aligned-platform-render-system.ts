@@ -12,7 +12,10 @@ import type {
     SingleSpinePlacementPreview,
 } from '../station-placement/preview.js';
 import type { LayerHost } from './layer-host.js';
-import type { TrackTextureRenderer } from './track-render-system.js';
+import type {
+    PlatformRenderStyle,
+    TrackTextureRenderer,
+} from './track-render-system.js';
 
 /** World-space length per one repeat of the platform texture (tiling). */
 const PLATFORM_TEXTURE_TILE_LEN = 2;
@@ -104,7 +107,8 @@ function projectOntoPolyline(
 }
 
 type TrackAlignedPlatformRenderRecord = {
-    container: Container;
+    /** The elevation the platform was added at, to redraw it at. */
+    elevation: number;
 };
 
 function platformKey(id: number): string {
@@ -136,6 +140,7 @@ export class TrackAlignedPlatformRenderSystem
     private _records: Map<number, TrackAlignedPlatformRenderRecord> = new Map();
     private _platformTexture: Texture | null = null;
     private _abortController = new AbortController();
+    private _renderStyle: PlatformRenderStyle = 'detailed';
 
     // Preview graphics for placement tools
     private _previewGraphics: Graphics | null = null;
@@ -193,11 +198,18 @@ export class TrackAlignedPlatformRenderSystem
         const platform = this._platformManager.getPlatform(id);
         if (platform === null) return;
 
-        const mesh = this._buildMesh(platform);
-        if (mesh === null) return;
+        // Recorded even when it can't be drawn (a detailed platform without a
+        // texture renderer), so a change of style can draw it.
+        this._records.set(id, { elevation });
+
+        const drawing =
+            this._renderStyle === 'outline'
+                ? this._buildOutline(platform)
+                : this._buildMesh(platform);
+        if (drawing === null) return;
 
         const container = new Container();
-        container.addChild(mesh);
+        container.addChild(drawing);
 
         const key = platformKey(id);
         const elevationRaw = elevation * LEVEL_HEIGHT;
@@ -211,8 +223,6 @@ export class TrackAlignedPlatformRenderSystem
         );
         this._worldRenderSystem.setOrderInBand(key, 450);
         this._worldRenderSystem.sortChildren();
-
-        this._records.set(id, { container });
     }
 
     removePlatform(id: number): void {
@@ -223,6 +233,24 @@ export class TrackAlignedPlatformRenderSystem
         const removed = this._worldRenderSystem.removeFromBand(key);
         removed?.destroy({ children: true });
         this._records.delete(id);
+    }
+
+    /**
+     * How platforms are drawn; see {@link PlatformRenderStyle}. Defaults to
+     * `detailed`. Changing it redraws every platform, at the elevation it
+     * was added at.
+     */
+    get renderStyle(): PlatformRenderStyle {
+        return this._renderStyle;
+    }
+
+    set renderStyle(style: PlatformRenderStyle) {
+        if (this._renderStyle === style) return;
+        this._renderStyle = style;
+        for (const [id, { elevation }] of [...this._records]) {
+            this.removePlatform(id);
+            this.addPlatform(id, elevation);
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -546,22 +574,54 @@ export class TrackAlignedPlatformRenderSystem
     // Mesh
     // ---------------------------------------------------------------------------
 
+    /** A segment's curve; throws when the segment is missing. */
+    private _getCurve = (segmentId: number) => {
+        const curve = this._trackGraph.getTrackSegmentCurve(segmentId);
+        if (curve === null)
+            throw new Error(`Missing curve for segment ${segmentId}`);
+        return curve;
+    };
+
+    /**
+     * A one-pixel outline of a platform: along its edge by the track, then
+     * back along its outer vertices. Null when a track is missing, or for
+     * the shapes the mesh doesn't draw either.
+     */
+    private _buildOutline(platform: TrackAlignedPlatform): Graphics | null {
+        let trackEdge: Point[];
+        try {
+            trackEdge = sampleSpineEdge(
+                platform.spine,
+                platform.offset,
+                this._getCurve
+            );
+        } catch {
+            return null;
+        }
+        if (trackEdge.length < 2 || platform.outerVertices.length < 1) {
+            return null;
+        }
+        const [first, ...rest] = [...trackEdge, ...platform.outerVertices];
+
+        const graphics = new Graphics();
+        graphics.moveTo(first.x, first.y);
+        for (const point of rest) {
+            graphics.lineTo(point.x, point.y);
+        }
+        graphics.closePath();
+        graphics.stroke({ color: 0x000000, pixelLine: true });
+        return graphics;
+    }
+
     private _buildMesh(platform: TrackAlignedPlatform): MeshSimple | null {
         const texture = this._getOrCreateTexture();
         if (texture === null) return null;
-
-        const getCurve = (segmentId: number) => {
-            const curve = this._trackGraph.getTrackSegmentCurve(segmentId);
-            if (curve === null)
-                throw new Error(`Missing curve for segment ${segmentId}`);
-            return curve;
-        };
 
         try {
             const trackEdge = sampleSpineEdge(
                 platform.spine,
                 platform.offset,
-                getCurve
+                this._getCurve
             );
             return this._buildSingleSpineStripMesh(
                 trackEdge,

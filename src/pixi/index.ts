@@ -8,6 +8,8 @@ export type {
 export { StationRenderSystem } from './station-render-system.js';
 export { TrackAlignedPlatformRenderSystem } from './track-aligned-platform-render-system.js';
 export {
+    type PlatformRenderStyle,
+    type TrackRenderStyle,
     TrackRenderSystem,
     type TrackRenderSystemOptions,
     type TrackTextureRenderer,

@@ -6,7 +6,12 @@ import type { TrackTextureRenderer } from '../src/pixi/track-render-system.js';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackAlignedPlatformManager } from '../src/stations/track-aligned-platform-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { RecordingLayerHost, textureRenderer } from './pixi-helpers.js';
+import {
+    RecordingLayerHost,
+    fillsAnything,
+    strokedLines,
+    textureRenderer,
+} from './pixi-helpers.js';
 import { layTrack } from './station-placement-helpers.js';
 
 const PREVIEW = 'track-aligned-platform-preview';
@@ -245,5 +250,85 @@ describe('TrackAlignedPlatformRenderSystem', () => {
 
         expect(host.bandKeys).toEqual([]);
         expect(host.drawableKeys).toEqual([]);
+    });
+});
+
+describe('TrackAlignedPlatformRenderSystem: outline style', () => {
+    const KEY = 'track-aligned-platform-0';
+
+    it('draws a platform as its closed outline, unfilled', () => {
+        const { host, renderer, id } = scene();
+        renderer.renderStyle = 'outline';
+
+        renderer.addPlatform(id, 0);
+
+        const lines = strokedLines(host.bandItem(KEY));
+        expect(lines).toHaveLength(1);
+        const { points, closed } = lines[0]!;
+        expect(closed).toBe(true);
+        expect(fillsAnything(host.bandItem(KEY))).toBe(false);
+        // Along the track edge, 2 m off the track, then back along the outer vertices.
+        const trackEdge = points.slice(0, -2);
+        expect(trackEdge[0]!.x).toBeCloseTo(0);
+        expect(trackEdge.at(-1)!.x).toBeCloseTo(100);
+        for (const point of trackEdge) {
+            expect(point.y).toBeCloseTo(2);
+        }
+        expect(points.slice(-2)).toEqual([
+            { x: 100, y: 8 },
+            { x: 0, y: 8 },
+        ]);
+    });
+
+    it('outlines nothing for a platform without outer vertices, as the mesh does', () => {
+        const { host, platforms, renderer } = scene();
+        renderer.renderStyle = 'outline';
+        const id = platforms.createPlatform({
+            stationId: 1,
+            spine: [{ trackSegment: 0, tStart: 0, tEnd: 1, side: 1 }],
+            offset: 2,
+            outerVertices: [],
+            stopPositions: [],
+        });
+
+        expect(host.bandKeys).toEqual([]);
+        expect(host.bandItem(`track-aligned-platform-${id}`)).toBeUndefined();
+    });
+
+    it('draws the outline without a texture renderer', () => {
+        const { host, renderer, id } = scene(null);
+        renderer.renderStyle = 'outline';
+
+        renderer.addPlatform(id, 0);
+
+        expect(strokedLines(host.bandItem(KEY))).toHaveLength(1);
+    });
+
+    it('redraws its platforms when the style changes, at the elevation they were added at', () => {
+        const { host, renderer, id } = scene();
+        renderer.addPlatform(id, 1);
+        const mesh = host.bandItem(KEY)!;
+
+        renderer.renderStyle = 'outline';
+
+        expect(mesh.destroyed).toBe(true);
+        expect(strokedLines(host.bandItem(KEY))).toHaveLength(1);
+        expect(host.bandOf(KEY)).toBe(4);
+
+        renderer.renderStyle = 'detailed';
+
+        expect(strokedLines(host.bandItem(KEY))).toHaveLength(0);
+        expect(host.bandItem(KEY)!.children).toHaveLength(1);
+        expect(host.bandOf(KEY)).toBe(4);
+    });
+
+    it('outlines a platform it could not texture once the style changes', () => {
+        const { host, renderer, id } = scene(null);
+        renderer.addPlatform(id, 0);
+        expect(host.bandKeys).toEqual([]);
+
+        renderer.renderStyle = 'outline';
+
+        expect(strokedLines(host.bandItem(KEY))).toHaveLength(1);
     });
 });
