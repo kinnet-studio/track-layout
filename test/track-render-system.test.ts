@@ -621,8 +621,11 @@ describe('TrackRenderSystem: line styles', () => {
 
         curveCreation.emit('onPreviewDrawDataChange', previewData(graph));
 
-        expect(host.bandKeys).toEqual(['__preview__0']);
-        expect(strokedLines(host.bandItem('__preview__0'))).toHaveLength(2);
+        expect(host.bandKeys).toEqual(['__preview_rail__0']);
+        expect(host.sublayerOf('__preview_rail__0')).toBe('rail');
+        expect(strokedLines(host.bandItem('__preview_rail__0'))).toHaveLength(
+            2
+        );
     });
 
     it('draws the preview curve arcs too', () => {
@@ -681,8 +684,10 @@ describe('TrackRenderSystem: line styles', () => {
 
         renderer.renderStyle = 'centerline';
 
-        expect(host.bandKeys).toEqual(['__preview__0']);
-        expect(strokedLines(host.bandItem('__preview__0'))).toHaveLength(1);
+        expect(host.bandKeys).toEqual(['__preview_rail__0']);
+        expect(strokedLines(host.bandItem('__preview_rail__0'))).toHaveLength(
+            1
+        );
 
         renderer.renderStyle = 'detailed';
 

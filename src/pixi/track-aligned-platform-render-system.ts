@@ -198,8 +198,8 @@ export class TrackAlignedPlatformRenderSystem
         const platform = this._platformManager.getPlatform(id);
         if (platform === null) return;
 
-        // Recorded even when it can't be drawn (a detailed platform without a
-        // texture renderer), so a change of style can draw it.
+        // Recorded even when nothing can be drawn, such as a detailed platform
+        // without a texture renderer, so a change of style can try again.
         this._records.set(id, { elevation });
 
         const drawing =

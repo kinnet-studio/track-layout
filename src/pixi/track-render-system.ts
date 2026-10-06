@@ -83,16 +83,16 @@ const railHalfWidth = (drawData: TrackSegmentDrawData): number => {
 
 /**
  * Points along `curve`, every {@link LINE_TRACK_SAMPLE_LEN} meters of arc
- * length, moved `offset` meters along its normal: 0 for the middle of the
- * track, ±gauge / 2 for the rails.
+ * length, each with the curve's unit normal there. Sampling is the costly
+ * part, so the rails share one set of samples.
  */
-const offsetCurvePoints = (curve: BCurve, offset: number): Point[] => {
+const sampleCurve = (curve: BCurve): { point: Point; normal: Point }[] => {
     const steps = Math.max(
         2,
         Math.ceil(curve.fullLength / LINE_TRACK_SAMPLE_LEN)
     );
     const controlPoints = curve.getControlPoints();
-    const points: Point[] = [];
+    const samples: { point: Point; normal: Point }[] = [];
     for (let i = 0; i <= steps; i++) {
         const t = i / steps;
         const point =
@@ -102,12 +102,9 @@ const offsetCurvePoints = (curve: BCurve, offset: number): Point[] => {
                   ? controlPoints[controlPoints.length - 1]
                   : curve.getPointbyPercentage(t);
         const tangent = PointCal.unitVector(curve.derivativeByPercentage(t));
-        points.push({
-            x: point.x - tangent.y * offset,
-            y: point.y + tangent.x * offset,
-        });
+        samples.push({ point, normal: { x: -tangent.y, y: tangent.x } });
     }
-    return points;
+    return samples;
 };
 
 /** A one-pixel line along `curve`, which Pixi draws as a Bezier curve. */
@@ -146,9 +143,9 @@ const buildBezierLine = (curve: BCurve): Graphics => {
  * - `rails`: a line along each rail, the track's gauge apart, at every zoom
  *   level.
  *
- * Lines are one pixel wide at any zoom. The line styles draw nothing else
- * but the dashed marker over underground track, and need no texture
- * renderer.
+ * Lines are one pixel wide at any zoom. The line styles leave out ballast,
+ * beds, shadows, catenary masts and tunnels (the dashed marker over
+ * underground track stays), and need no texture renderer.
  */
 export type TrackRenderStyle = 'detailed' | 'centerline' | 'rails';
 
@@ -259,7 +256,7 @@ export class TrackRenderSystem {
 
     private _camera: ObservableBoardCamera;
 
-    /** Optional renderer for generating track texture (required for texture render style). */
+    /** Optional renderer for generating track texture (required for the detailed style). */
     private _textureRenderer: TrackTextureRenderer | null = null;
 
     /** Whether to show elevation gradient on ballast (vs solid color). */
@@ -703,10 +700,15 @@ export class TrackRenderSystem {
      */
     private _buildLineTrack(curve: BCurve, gauge: number): Graphics {
         const graphics = new Graphics();
+        const samples = sampleCurve(curve);
+        // 0 for the middle of the track, ±gauge / 2 for the rails.
         const offsets =
             this._renderStyle === 'rails' ? [-gauge / 2, gauge / 2] : [0];
         for (const offset of offsets) {
-            const [first, ...rest] = offsetCurvePoints(curve, offset);
+            const [first, ...rest] = samples.map(({ point, normal }) => ({
+                x: point.x + normal.x * offset,
+                y: point.y + normal.y * offset,
+            }));
             graphics.moveTo(first.x, first.y);
             for (const point of rest) {
                 graphics.lineTo(point.x, point.y);
@@ -2734,30 +2736,40 @@ export class TrackRenderSystem {
         });
     }
 
-    /** Draws preview track in the current line style, as laid track is. */
+    /**
+     * Draws preview track in the current line style, in the rail sublayer
+     * as laid track is, with the curve arcs (if shown) in the drawable
+     * sublayer as for detailed previews.
+     */
     private _drawLinePreview(drawDataList: PreviewDrawData): void {
         drawDataList.forEach(({ drawData, index }, i) => {
-            const key = `__preview__${i}`;
-
-            const container = new Container();
-            if (this._showPreviewCurveArcs) {
-                container.addChild(this._buildPreviewArcFan(drawData.curve));
-            }
-            container.addChild(
-                this._buildLineTrack(drawData.curve, drawData.gauge)
-            );
-
             const bandIndex = this._worldRenderSystem.getElevationBandIndex(
                 Math.max(drawData.elevation.from, drawData.elevation.to)
             );
-            this._worldRenderSystem.addToBand(
-                key,
-                container,
-                bandIndex,
-                'drawable'
+
+            if (this._showPreviewCurveArcs) {
+                const key = `__preview__${i}`;
+                this._worldRenderSystem.addToBand(
+                    key,
+                    this._buildPreviewArcFan(drawData.curve),
+                    bandIndex,
+                    'drawable'
+                );
+                this._worldRenderSystem.setOrderInBand(key, index);
+                this._previewKeys.push(key);
+            }
+
+            const railContainer = new Container();
+            railContainer.addChild(
+                this._buildLineTrack(drawData.curve, drawData.gauge)
             );
-            this._worldRenderSystem.setOrderInBand(key, index);
-            this._previewKeys.push(key);
+            this._worldRenderSystem.addToBand(
+                `__preview_rail__${this._previewRailContainers.length}`,
+                railContainer,
+                bandIndex,
+                'rail'
+            );
+            this._previewRailContainers.push(railContainer);
         });
     }
 

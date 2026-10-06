@@ -161,9 +161,11 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
     - `TrackRenderSystem`: `'detailed'` (the default: textured track when
       zoomed in, a line when zoomed out), `'centerline'` (a line along the
       middle of each segment) or `'rails'` (a line along each rail, the
-      segment's gauge apart). The line styles show at every zoom level,
-      draw the previews the same way, and draw nothing else apart from the
-      dashed marker over underground track.
+      segment's gauge apart). The line styles show at every zoom level and
+      draw the previews the same way. They leave out ballast, beds,
+      shadows, catenary masts and tunnels, but keep the dashed marker over
+      underground track; highlights and snap dots are drawn as in
+      `'detailed'`.
     - `StationRenderSystem` and `TrackAlignedPlatformRenderSystem`:
       `'detailed'` (the default) or `'outline'`, which outlines each
       platform. The two platforms that make up an island are outlined
