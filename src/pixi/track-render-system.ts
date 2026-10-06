@@ -12,6 +12,7 @@ import type {
     CatenaryPreviewState,
     DeletionHighlightState,
     DuplicateHighlightState,
+    PreviewDrawData,
 } from '../editing/preview-types.js';
 import { LEVEL_HEIGHT } from '../index.js';
 import { TrackCurveManager } from '../index.js';
@@ -69,6 +70,9 @@ const SHADOW_TEX_SIZE = 4;
 /** Size of the tiny solid-color textures used for tunnel meshes. */
 const TUNNEL_TEX_SIZE = 4;
 
+/** Arc length (meters) between the points of line-style track, as for the rail mesh. */
+const LINE_TRACK_SAMPLE_LEN = 2;
+
 /** Compute the rail mesh half-width (always derived from gauge — not affected by ballast width). */
 const railHalfWidth = (drawData: TrackSegmentDrawData): number => {
     const style = drawData.trackStyle ?? 'ballasted';
@@ -76,6 +80,83 @@ const railHalfWidth = (drawData: TrackSegmentDrawData): number => {
     const texFullWidth = TRACK_TEX_SIZE + tieOverhang * 2;
     return (drawData.gauge / 2) * (texFullWidth / TRACK_TEX_SIZE);
 };
+
+/**
+ * Points along `curve`, every {@link LINE_TRACK_SAMPLE_LEN} meters of arc
+ * length, each with the curve's unit normal there. Sampling is the costly
+ * part, so the rails share one set of samples.
+ */
+const sampleCurve = (curve: BCurve): { point: Point; normal: Point }[] => {
+    const steps = Math.max(
+        2,
+        Math.ceil(curve.fullLength / LINE_TRACK_SAMPLE_LEN)
+    );
+    const controlPoints = curve.getControlPoints();
+    const samples: { point: Point; normal: Point }[] = [];
+    for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const point =
+            i === 0
+                ? controlPoints[0]
+                : i === steps
+                  ? controlPoints[controlPoints.length - 1]
+                  : curve.getPointbyPercentage(t);
+        const tangent = PointCal.unitVector(curve.derivativeByPercentage(t));
+        samples.push({ point, normal: { x: -tangent.y, y: tangent.x } });
+    }
+    return samples;
+};
+
+/** A one-pixel line along `curve`, which Pixi draws as a Bezier curve. */
+const buildBezierLine = (curve: BCurve): Graphics => {
+    const graphics = new Graphics();
+    const controlPoints = curve.getControlPoints();
+
+    graphics.moveTo(controlPoints[0].x, controlPoints[0].y);
+    if (controlPoints.length === 3) {
+        graphics.quadraticCurveTo(
+            controlPoints[1].x,
+            controlPoints[1].y,
+            controlPoints[2].x,
+            controlPoints[2].y
+        );
+    } else {
+        graphics.bezierCurveTo(
+            controlPoints[1].x,
+            controlPoints[1].y,
+            controlPoints[2].x,
+            controlPoints[2].y,
+            controlPoints[3].x,
+            controlPoints[3].y
+        );
+    }
+    graphics.stroke({ color: 0x000000, pixelLine: true });
+    return graphics;
+};
+
+/**
+ * How a {@link TrackRenderSystem} draws track:
+ *
+ * - `detailed`: textured ballast, rails, beds, shadows, catenary and tunnels
+ *   from zoom level 5 up, and a line along the middle of the track below it.
+ * - `centerline`: a line along the middle of the track, at every zoom level.
+ * - `rails`: a line along each rail, the track's gauge apart, at every zoom
+ *   level.
+ *
+ * Lines are one pixel wide at any zoom. The line styles leave out ballast,
+ * beds, shadows, catenary masts and tunnels (the dashed marker over
+ * underground track stays), and need no texture renderer.
+ */
+export type TrackRenderStyle = 'detailed' | 'centerline' | 'rails';
+
+/**
+ * How `StationRenderSystem` and `TrackAlignedPlatformRenderSystem` draw
+ * platforms: textured (`detailed`, which needs a texture renderer), or as a
+ * one-pixel outline of each platform (`outline`, which doesn't). The two
+ * platforms that make up an island are outlined separately, so a line runs
+ * down its middle.
+ */
+export type PlatformRenderStyle = 'detailed' | 'outline';
 
 /** Renderer (or app) that provides texture generation for the texture-style track and train cars. */
 export type TrackTextureRenderer = {
@@ -93,9 +174,10 @@ export type TrackTextureRenderer = {
 export type TrackRenderSystemOptions = {
     /**
      * Generates the textures for ballast, rails, beds, shadows, tunnels and
-     * cuttings. Without it only the zoomed-out line is drawn, and from zoom
-     * level 5 up the line is hidden, so track disappears (apart from
-     * catenary poles). Pass one in any app that draws for people.
+     * cuttings. Without it the `detailed` style only draws the zoomed-out
+     * line, and from zoom level 5 up the line is hidden, so track
+     * disappears (apart from catenary poles). Pass one in any app that
+     * draws detailed track for people. The line styles don't use it.
      */
     textureRenderer?: TrackTextureRenderer | null;
     /** Terrain heights; without it the ground is flat at height 0. */
@@ -174,11 +256,13 @@ export class TrackRenderSystem {
 
     private _camera: ObservableBoardCamera;
 
-    /** Optional renderer for generating track texture (required for texture render style). */
+    /** Optional renderer for generating track texture (required for the detailed style). */
     private _textureRenderer: TrackTextureRenderer | null = null;
 
     /** Whether to show elevation gradient on ballast (vs solid color). */
     private _showElevationGradient: boolean = false;
+
+    private _renderStyle: TrackRenderStyle = 'detailed';
 
     /** Catenary pole containers keyed by draw data key. */
     private _catenaryMap: Map<string, Container> = new Map();
@@ -452,6 +536,23 @@ export class TrackRenderSystem {
         this._onPreviewDrawDataChange(this._latestPreviewDrawDataList);
     }
 
+    /**
+     * How track is drawn; see {@link TrackRenderStyle}. Defaults to
+     * `detailed`. Changing it redraws all track and the current preview.
+     */
+    get renderStyle(): TrackRenderStyle {
+        return this._renderStyle;
+    }
+
+    set renderStyle(style: TrackRenderStyle) {
+        if (this._renderStyle === style) return;
+        this._renderStyle = style;
+        this._removeLaidTrack();
+        this._drawExistingTrack();
+        this._onPreviewDrawDataChange(this._latestPreviewDrawDataList);
+        this._applyZoomLod(this._camera.zoomLevel);
+    }
+
     private _onZoom(_event: CameraZoomEventPayload, cameraState: CameraState) {
         this._applyZoomLod(cameraState.zoomLevel);
         // Redraw preview so radius labels pick up new zoom-based font size.
@@ -463,9 +564,12 @@ export class TrackRenderSystem {
     /**
      * Toggle track representation by zoom: low zoom shows only the bezier curve;
      * high zoom shows detailed draw data (elevation segments, shadows) and hides the simplified curve.
+     * The line styles only draw the simplified curve, and show it at every zoom.
      */
     private _applyZoomLod(zoomLevel: number): void {
-        const useDetailed = zoomLevel >= ZOOM_THRESHOLD_DETAILED_TRACK;
+        const useDetailed =
+            this._renderStyle === 'detailed' &&
+            zoomLevel >= ZOOM_THRESHOLD_DETAILED_TRACK;
 
         for (const [, entry] of this._simplifiedTrackGraphicsMap) {
             entry.graphics.visible = !useDetailed;
@@ -589,46 +693,36 @@ export class TrackRenderSystem {
         this._previewEndProjection.tint = color;
     }
 
-    cleanup() {
-        this._abortController.abort();
+    /**
+     * One-pixel lines along `curve` in the current line style: one along the
+     * middle, or one along each rail, `gauge` meters apart. Pixi's own Bezier
+     * is too coarse for this when zoomed in, so the lines are sampled.
+     */
+    private _buildLineTrack(curve: BCurve, gauge: number): Graphics {
+        const graphics = new Graphics();
+        const samples = sampleCurve(curve);
+        // 0 for the middle of the track, ±gauge / 2 for the rails.
+        const offsets =
+            this._renderStyle === 'rails' ? [-gauge / 2, gauge / 2] : [0];
+        for (const offset of offsets) {
+            const [first, ...rest] = samples.map(({ point, normal }) => ({
+                x: point.x + normal.x * offset,
+                y: point.y + normal.y * offset,
+            }));
+            graphics.moveTo(first.x, first.y);
+            for (const point of rest) {
+                graphics.lineTo(point.x, point.y);
+            }
+        }
+        graphics.stroke({ color: 0x000000, pixelLine: true });
+        return graphics;
+    }
 
-        this._previewKeys.forEach(key => {
-            const container = this._worldRenderSystem.removeFromBand(key);
-            container?.destroy({ children: true });
-        });
-        this._previewKeys = [];
-        this._previewRailContainers.forEach((c, idx) => {
-            const removed = this._worldRenderSystem.removeFromBand(
-                `__preview_rail__${idx}`
-            );
-            removed?.destroy({ children: true });
-        });
-        this._previewRailContainers = [];
-        this._previewCuttingKeys.forEach(ck => {
-            const removed = this._worldRenderSystem.removeFromBand(ck);
-            removed?.destroy({ children: true });
-        });
-        this._previewCuttingKeys = [];
-        this._previewCoverKeys.forEach(ck => {
-            const removed = this._worldRenderSystem.removeFromBand(ck);
-            removed?.destroy({ children: true });
-        });
-        this._previewCoverKeys = [];
-        this._previewTunnelWallKeys.forEach(tk => {
-            const removed = this._worldRenderSystem.removeFromBand(tk);
-            removed?.destroy({ children: true });
-        });
-        this._previewTunnelWallKeys = [];
-        this._previewTunnelCeilingKeys.forEach(tk => {
-            const removed = this._worldRenderSystem.removeFromBand(tk);
-            removed?.destroy({ children: true });
-        });
-        this._previewTunnelCeilingKeys = [];
-        this._previewBedKeys.forEach(bk => {
-            this._worldRenderSystem.removeBed(bk);
-        });
-        this._previewBedKeys = [];
-
+    /**
+     * Removes and destroys everything drawn for laid track, so it can be
+     * drawn again. Previews, highlights and textures stay.
+     */
+    private _removeLaidTrack(): void {
         this._drawableKeys.forEach(key => {
             const container = this._worldRenderSystem.removeFromBand(key);
             container?.destroy({ children: true });
@@ -644,9 +738,6 @@ export class TrackRenderSystem {
         this._shadowRecords.clear();
         this._bedMeshMap.clear();
         this._offsetRailMap.clear();
-
-        this._previewStartProjection.destroy();
-        this._previewEndProjection.destroy();
 
         this._catenaryMap.forEach((catenaryContainer, key) => {
             const removed = this._worldRenderSystem.removeFromBand(
@@ -704,13 +795,60 @@ export class TrackRenderSystem {
         });
         this._undergroundIndicatorMap.clear();
 
+        this._ballastStyleNodes.clear();
+    }
+
+    cleanup() {
+        this._abortController.abort();
+
+        this._previewKeys.forEach(key => {
+            const container = this._worldRenderSystem.removeFromBand(key);
+            container?.destroy({ children: true });
+        });
+        this._previewKeys = [];
+        this._previewRailContainers.forEach((c, idx) => {
+            const removed = this._worldRenderSystem.removeFromBand(
+                `__preview_rail__${idx}`
+            );
+            removed?.destroy({ children: true });
+        });
+        this._previewRailContainers = [];
+        this._previewCuttingKeys.forEach(ck => {
+            const removed = this._worldRenderSystem.removeFromBand(ck);
+            removed?.destroy({ children: true });
+        });
+        this._previewCuttingKeys = [];
+        this._previewCoverKeys.forEach(ck => {
+            const removed = this._worldRenderSystem.removeFromBand(ck);
+            removed?.destroy({ children: true });
+        });
+        this._previewCoverKeys = [];
+        this._previewTunnelWallKeys.forEach(tk => {
+            const removed = this._worldRenderSystem.removeFromBand(tk);
+            removed?.destroy({ children: true });
+        });
+        this._previewTunnelWallKeys = [];
+        this._previewTunnelCeilingKeys.forEach(tk => {
+            const removed = this._worldRenderSystem.removeFromBand(tk);
+            removed?.destroy({ children: true });
+        });
+        this._previewTunnelCeilingKeys = [];
+        this._previewBedKeys.forEach(bk => {
+            this._worldRenderSystem.removeBed(bk);
+        });
+        this._previewBedKeys = [];
+
+        this._removeLaidTrack();
+
+        this._previewStartProjection.destroy();
+        this._previewEndProjection.destroy();
+
         this._worldRenderSystem.removeOverlayContainer(this._topLevelContainer);
         this._topLevelContainer.destroy({ children: true });
 
         this._worldRenderSystem.removeOverlayContainer(this._simplifiedTrack);
         this._simplifiedTrack.destroy({ children: true });
 
-        this._ballastStyleNodes.clear();
         if (this._solidBallastTexture !== null) {
             this._solidBallastTexture.destroy(true);
             this._solidBallastTexture = null;
@@ -1873,28 +2011,10 @@ export class TrackRenderSystem {
         curveNumber: number,
         trackSegment: TrackSegmentWithCollision
     ) {
-        const simplifiedTrackGraphics = new Graphics();
-        const controlPoints = trackSegment.curve.getControlPoints();
-
-        simplifiedTrackGraphics.moveTo(controlPoints[0].x, controlPoints[0].y);
-        if (controlPoints.length === 3) {
-            simplifiedTrackGraphics.quadraticCurveTo(
-                controlPoints[1].x,
-                controlPoints[1].y,
-                controlPoints[2].x,
-                controlPoints[2].y
-            );
-        } else {
-            simplifiedTrackGraphics.bezierCurveTo(
-                controlPoints[1].x,
-                controlPoints[1].y,
-                controlPoints[2].x,
-                controlPoints[2].y,
-                controlPoints[3].x,
-                controlPoints[3].y
-            );
-        }
-        simplifiedTrackGraphics.stroke({ color: 0x000000, pixelLine: true });
+        const simplifiedTrackGraphics =
+            this._renderStyle === 'detailed'
+                ? buildBezierLine(trackSegment.curve)
+                : this._buildLineTrack(trackSegment.curve, trackSegment.gauge);
 
         const rawElevation = Math.max(
             trackSegment.elevation.from * LEVEL_HEIGHT,
@@ -1985,6 +2105,13 @@ export class TrackRenderSystem {
             negativeOffsets: Point[];
         })[]
     ) {
+        // The line styles draw whole segments in _onAddTrackSegment; the
+        // pieces only need their bands recorded.
+        if (this._renderStyle !== 'detailed') {
+            this._reindexDrawData();
+            return;
+        }
+
         drawDataList.forEach(drawData => {
             const key = JSON.stringify({
                 trackSegmentNumber:
@@ -2467,6 +2594,11 @@ export class TrackRenderSystem {
             return;
         }
 
+        if (this._renderStyle !== 'detailed') {
+            this._drawLinePreview(drawDataList);
+            return;
+        }
+
         drawDataList.forEach(({ drawData, index }, i) => {
             const key = `__preview__${i}`;
 
@@ -2535,104 +2667,11 @@ export class TrackRenderSystem {
 
             // Arc visualization overlay (optional).
             if (this._showPreviewCurveArcs) {
-                const arcFanContainer = new Container();
-                // For straight lines, arc fitting is not meaningful (circle radius -> ∞)
-                // and can produce noisy results. Skip entirely.
-                if (!curveIsNearlyStraight(drawData.curve)) {
-                    const arcs = drawData.curve.getArcs(0.5);
-                    for (const arc of arcs) {
-                        const a0 = Math.atan2(
-                            arc.startPoint.y - arc.center.y,
-                            arc.startPoint.x - arc.center.x
-                        );
-                        const a1 = Math.atan2(
-                            arc.endPoint.y - arc.center.y,
-                            arc.endPoint.x - arc.center.x
-                        );
-
-                        // Choose direction that best matches the curve by sampling a midpoint.
-                        const midT = (arc.startT + arc.endT) / 2;
-                        const midPoint = drawData.curve.get(midT);
-                        const am = Math.atan2(
-                            midPoint.y - arc.center.y,
-                            midPoint.x - arc.center.x
-                        );
-
-                        const cwErr = arcDirectionFitError(
-                            arc.center,
-                            arc.radius,
-                            a0,
-                            a1,
-                            am,
-                            'cw'
-                        );
-                        const ccwErr = arcDirectionFitError(
-                            arc.center,
-                            arc.radius,
-                            a0,
-                            a1,
-                            am,
-                            'ccw'
-                        );
-                        const direction: 'cw' | 'ccw' =
-                            cwErr <= ccwErr ? 'cw' : 'ccw';
-
-                        const wedge = new Graphics();
-                        // Build a "fan" (sector) shape: center -> start -> arc -> back to center.
-                        // Use polyline instead of Graphics.arc() to avoid full-circle ambiguity.
-                        const span = angleDelta(a0, a1, direction);
-                        if (span > Math.PI * 1.9) continue; // Skip near-full-circle arcs
-                        wedge.moveTo(arc.center.x, arc.center.y);
-                        wedge.lineTo(arc.startPoint.x, arc.startPoint.y);
-                        drawArcPolyline(
-                            wedge,
-                            arc.center,
-                            arc.radius,
-                            a0,
-                            a1,
-                            direction
-                        );
-                        wedge.lineTo(arc.center.x, arc.center.y);
-                        wedge.closePath();
-                        wedge.fill({ color: 0x1d4ed8, alpha: 0.18 });
-                        wedge.stroke({
-                            color: 0x1d4ed8,
-                            alpha: 0.55,
-                            pixelLine: true,
-                            width: 1,
-                        });
-                        arcFanContainer.addChild(wedge);
-
-                        // CAD-style radius label: position near the arc (not at center).
-                        const labelDist = arc.radius * 0.7; // ~70% from center toward arc
-                        const midAngle =
-                            direction === 'ccw' ? a0 + span / 2 : a0 - span / 2;
-                        const labelX =
-                            arc.center.x + Math.cos(midAngle) * labelDist;
-                        const labelY =
-                            arc.center.y + Math.sin(midAngle) * labelDist;
-                        const zoomLevel = this._camera.zoomLevel;
-                        // Use fixed pixel font + scale container by 1/zoom so text stays crisp and constant screen size.
-                        const labelContainer = new Container();
-                        labelContainer.position.set(labelX, labelY);
-                        labelContainer.scale.set(1 / zoomLevel, 1 / zoomLevel);
-                        const radiusLabel = new Text({
-                            text: `R ${arc.radius.toFixed(1)}`,
-                            style: {
-                                fontFamily: 'sans-serif',
-                                fontSize: 14,
-                                fill: 0x1d4ed8,
-                                fontWeight: '600',
-                            },
-                        });
-                        radiusLabel.anchor.set(0.5, 0.5);
-                        radiusLabel.position.set(0, 0);
-                        labelContainer.addChild(radiusLabel);
-                        arcFanContainer.addChild(labelContainer);
-                    }
-                }
                 // Put the fan wedges behind the preview meshes.
-                segmentsContainer.addChildAt(arcFanContainer, 0);
+                segmentsContainer.addChildAt(
+                    this._buildPreviewArcFan(drawData.curve),
+                    0
+                );
             }
 
             const bandIndex = this._worldRenderSystem.getElevationBandIndex(
@@ -2695,6 +2734,144 @@ export class TrackRenderSystem {
                 this._previewTunnelCeilingKeys.push(ceilingKey);
             }
         });
+    }
+
+    /**
+     * Draws preview track in the current line style, in the rail sublayer
+     * as laid track is, with the curve arcs (if shown) in the drawable
+     * sublayer as for detailed previews.
+     */
+    private _drawLinePreview(drawDataList: PreviewDrawData): void {
+        drawDataList.forEach(({ drawData, index }, i) => {
+            const bandIndex = this._worldRenderSystem.getElevationBandIndex(
+                Math.max(drawData.elevation.from, drawData.elevation.to)
+            );
+
+            if (this._showPreviewCurveArcs) {
+                const key = `__preview__${i}`;
+                this._worldRenderSystem.addToBand(
+                    key,
+                    this._buildPreviewArcFan(drawData.curve),
+                    bandIndex,
+                    'drawable'
+                );
+                this._worldRenderSystem.setOrderInBand(key, index);
+                this._previewKeys.push(key);
+            }
+
+            const railContainer = new Container();
+            railContainer.addChild(
+                this._buildLineTrack(drawData.curve, drawData.gauge)
+            );
+            this._worldRenderSystem.addToBand(
+                `__preview_rail__${this._previewRailContainers.length}`,
+                railContainer,
+                bandIndex,
+                'rail'
+            );
+            this._previewRailContainers.push(railContainer);
+        });
+    }
+
+    /**
+     * The optional preview overlay: a translucent fan for each circular arc
+     * the curve approximates, labelled with its radius.
+     */
+    private _buildPreviewArcFan(curve: BCurve): Container {
+        const arcFanContainer = new Container();
+        // For straight lines, arc fitting is not meaningful (circle radius -> ∞)
+        // and can produce noisy results. Skip entirely.
+        if (!curveIsNearlyStraight(curve)) {
+            const arcs = curve.getArcs(0.5);
+            for (const arc of arcs) {
+                const a0 = Math.atan2(
+                    arc.startPoint.y - arc.center.y,
+                    arc.startPoint.x - arc.center.x
+                );
+                const a1 = Math.atan2(
+                    arc.endPoint.y - arc.center.y,
+                    arc.endPoint.x - arc.center.x
+                );
+
+                // Choose direction that best matches the curve by sampling a midpoint.
+                const midT = (arc.startT + arc.endT) / 2;
+                const midPoint = curve.get(midT);
+                const am = Math.atan2(
+                    midPoint.y - arc.center.y,
+                    midPoint.x - arc.center.x
+                );
+
+                const cwErr = arcDirectionFitError(
+                    arc.center,
+                    arc.radius,
+                    a0,
+                    a1,
+                    am,
+                    'cw'
+                );
+                const ccwErr = arcDirectionFitError(
+                    arc.center,
+                    arc.radius,
+                    a0,
+                    a1,
+                    am,
+                    'ccw'
+                );
+                const direction: 'cw' | 'ccw' = cwErr <= ccwErr ? 'cw' : 'ccw';
+
+                const wedge = new Graphics();
+                // Build a "fan" (sector) shape: center -> start -> arc -> back to center.
+                // Use polyline instead of Graphics.arc() to avoid full-circle ambiguity.
+                const span = angleDelta(a0, a1, direction);
+                if (span > Math.PI * 1.9) continue; // Skip near-full-circle arcs
+                wedge.moveTo(arc.center.x, arc.center.y);
+                wedge.lineTo(arc.startPoint.x, arc.startPoint.y);
+                drawArcPolyline(
+                    wedge,
+                    arc.center,
+                    arc.radius,
+                    a0,
+                    a1,
+                    direction
+                );
+                wedge.lineTo(arc.center.x, arc.center.y);
+                wedge.closePath();
+                wedge.fill({ color: 0x1d4ed8, alpha: 0.18 });
+                wedge.stroke({
+                    color: 0x1d4ed8,
+                    alpha: 0.55,
+                    pixelLine: true,
+                    width: 1,
+                });
+                arcFanContainer.addChild(wedge);
+
+                // CAD-style radius label: position near the arc (not at center).
+                const labelDist = arc.radius * 0.7; // ~70% from center toward arc
+                const midAngle =
+                    direction === 'ccw' ? a0 + span / 2 : a0 - span / 2;
+                const labelX = arc.center.x + Math.cos(midAngle) * labelDist;
+                const labelY = arc.center.y + Math.sin(midAngle) * labelDist;
+                const zoomLevel = this._camera.zoomLevel;
+                // Use fixed pixel font + scale container by 1/zoom so text stays crisp and constant screen size.
+                const labelContainer = new Container();
+                labelContainer.position.set(labelX, labelY);
+                labelContainer.scale.set(1 / zoomLevel, 1 / zoomLevel);
+                const radiusLabel = new Text({
+                    text: `R ${arc.radius.toFixed(1)}`,
+                    style: {
+                        fontFamily: 'sans-serif',
+                        fontSize: 14,
+                        fill: 0x1d4ed8,
+                        fontWeight: '600',
+                    },
+                });
+                radiusLabel.anchor.set(0.5, 0.5);
+                radiusLabel.position.set(0, 0);
+                labelContainer.addChild(radiusLabel);
+                arcFanContainer.addChild(labelContainer);
+            }
+        }
+        return arcFanContainer;
     }
 
     /**

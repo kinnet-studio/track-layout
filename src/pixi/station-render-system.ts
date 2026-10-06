@@ -8,7 +8,10 @@ import type { StationManager } from '../index.js';
 import type { Platform } from '../index.js';
 import type { StationPlacementPreview } from '../station-placement/preview.js';
 import type { LayerHost } from './layer-host.js';
-import type { TrackTextureRenderer } from './track-render-system.js';
+import type {
+    PlatformRenderStyle,
+    TrackTextureRenderer,
+} from './track-render-system.js';
 
 /** World-space length per one repeat of the platform texture along the curve. */
 const PLATFORM_TEXTURE_TILE_LEN = 2;
@@ -49,6 +52,7 @@ export class StationRenderSystem implements StationPlacementPreview {
     private _records: Map<number, StationRenderRecord> = new Map();
     private _platformTexture: Texture | null = null;
     private _abortController = new AbortController();
+    private _renderStyle: PlatformRenderStyle = 'detailed';
 
     /**
      * Draws the stations the manager already holds, then each station it
@@ -87,9 +91,12 @@ export class StationRenderSystem implements StationPlacementPreview {
         const container = new Container();
 
         for (const platform of station.platforms) {
-            const mesh = this._buildPlatformMesh(platform);
-            if (mesh !== null) {
-                container.addChild(mesh);
+            const drawing =
+                this._renderStyle === 'outline'
+                    ? this._buildPlatformOutline(platform)
+                    : this._buildPlatformMesh(platform);
+            if (drawing !== null) {
+                container.addChild(drawing);
             }
         }
 
@@ -118,6 +125,23 @@ export class StationRenderSystem implements StationPlacementPreview {
         const removed = this._worldRenderSystem.removeFromBand(key);
         removed?.destroy({ children: true });
         this._records.delete(id);
+    }
+
+    /**
+     * How platforms are drawn; see {@link PlatformRenderStyle}. Defaults to
+     * `detailed`. Changing it redraws every station.
+     */
+    get renderStyle(): PlatformRenderStyle {
+        return this._renderStyle;
+    }
+
+    set renderStyle(style: PlatformRenderStyle) {
+        if (this._renderStyle === style) return;
+        this._renderStyle = style;
+        for (const id of [...this._records.keys()]) {
+            this.removeStation(id);
+            this.addStation(id);
+        }
     }
 
     cleanup(): void {
@@ -264,6 +288,55 @@ export class StationRenderSystem implements StationPlacementPreview {
     // ---------------------------------------------------------------------------
     // Mesh
     // ---------------------------------------------------------------------------
+
+    /**
+     * A one-pixel outline of a single platform: along its edge by the track,
+     * then back along its far edge. Sampled like the textured mesh, but
+     * from the very ends of the track and without the mesh's overlap at the
+     * far edge.
+     */
+    private _buildPlatformOutline(platform: Platform): Graphics | null {
+        const curve = this._trackGraph.getTrackSegmentCurve(platform.track);
+        if (curve === null) return null;
+
+        const steps = Math.max(2, Math.ceil(curve.fullLength / 2));
+        const { offset, width, side } = platform;
+        const nearEdge: Point[] = [];
+        const farEdge: Point[] = [];
+
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            // getPointbyPercentage(0) lands a little way into the curve.
+            const p =
+                i === 0
+                    ? curve.get(0)
+                    : i === steps
+                      ? curve.get(1)
+                      : curve.getPointbyPercentage(t);
+            const d = curve.derivative(t);
+            const mag = Math.sqrt(d.x * d.x + d.y * d.y);
+            if (mag < 1e-9) continue;
+
+            const nx = (-d.y / mag) * side;
+            const ny = (d.x / mag) * side;
+            nearEdge.push({ x: p.x + nx * offset, y: p.y + ny * offset });
+            farEdge.push({
+                x: p.x + nx * (offset + width),
+                y: p.y + ny * (offset + width),
+            });
+        }
+        if (nearEdge.length < 2) return null;
+
+        const [first, ...rest] = [...nearEdge, ...farEdge.reverse()];
+        const graphics = new Graphics();
+        graphics.moveTo(first.x, first.y);
+        for (const point of rest) {
+            graphics.lineTo(point.x, point.y);
+        }
+        graphics.closePath();
+        graphics.stroke({ color: 0x000000, pixelLine: true });
+        return graphics;
+    }
 
     /**
      * Build a textured mesh for a single platform by sampling the adjacent

@@ -1,5 +1,6 @@
 import { DefaultBoardCamera } from '@ue-too/board';
-import { type Container, Texture } from 'pixi.js';
+import type { Point } from '@ue-too/math';
+import { type Container, Graphics, Text, Texture } from 'pixi.js';
 
 import type { ELEVATION } from '../src/index.js';
 import type {
@@ -30,6 +31,55 @@ export function drawKey(segment: number, start = 0, end = 1): string {
         trackSegmentNumber: segment,
         tValInterval: { start, end },
     });
+}
+
+/** One line a graphics object strokes: a `moveTo` and the points after it. */
+export type StrokedLine = { points: Point[]; closed: boolean };
+
+/** Every graphics object in `container`'s subtree, itself included. */
+function graphicsIn(container: Container | undefined): Graphics[] {
+    if (container === undefined) return [];
+    const own = container instanceof Graphics ? [container] : [];
+    return [...own, ...container.children.flatMap(graphicsIn)];
+}
+
+/** The lines the graphics in `container`'s subtree stroke. */
+export function strokedLines(container: Container | undefined): StrokedLine[] {
+    const lines: StrokedLine[] = [];
+    for (const graphics of graphicsIn(container)) {
+        for (const instruction of graphics.context.instructions) {
+            if (instruction.action !== 'stroke') continue;
+            for (const { action, data } of instruction.data.path.instructions) {
+                if (action === 'moveTo') {
+                    lines.push({
+                        points: [{ x: data[0], y: data[1] }],
+                        closed: false,
+                    });
+                } else if (action === 'lineTo') {
+                    lines.at(-1)!.points.push({ x: data[0], y: data[1] });
+                } else if (action === 'closePath') {
+                    lines.at(-1)!.closed = true;
+                }
+            }
+        }
+    }
+    return lines;
+}
+
+/** Whether any graphics in `container`'s subtree fills a shape. */
+export function fillsAnything(container: Container | undefined): boolean {
+    return graphicsIn(container).some(graphics =>
+        graphics.context.instructions.some(
+            instruction => instruction.action === 'fill'
+        )
+    );
+}
+
+/** The text of every Text in `container`'s subtree. */
+export function textsIn(container: Container | undefined): string[] {
+    if (container === undefined) return [];
+    const own = container instanceof Text ? [container.text] : [];
+    return [...own, ...container.children.flatMap(textsIn)];
 }
 
 /** A camera at zoom 1, which shows the simplified track. */

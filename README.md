@@ -141,11 +141,11 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
   when it is built, then track as the graph adds and removes it. Its
   options are all optional:
     - `textureRenderer`, such as `{ renderer: app.renderer }`. Without it
-      only the zoomed-out line is drawn, and that is hidden from zoom level
-      5 up: zoomed-in track (ballast, rails, beds, shadows, tunnels and
-      cuttings) isn't drawn, and neither are stations or platforms
-      (catenary poles still are). Apps that draw for people should always
-      pass one.
+      detailed track is only the zoomed-out line, and that is hidden from
+      zoom level 5 up: zoomed-in track (ballast, rails, beds, shadows,
+      tunnels and cuttings) isn't drawn, and neither are detailed stations
+      or platforms (catenary poles still are). Apps that draw detailed
+      track for people should always pass one.
     - `terrain`, anything with `getHeight(x, y)`. Without it the ground is
       flat at height 0, so track below ground level is drawn in a tunnel
       (given a `textureRenderer`).
@@ -156,6 +156,22 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
   managers already hold when they are built, then draw and remove them as
   the managers create and destroy them. Both renderers also implement the
   station placement previews.
+- **Render styles.** Set a renderer's `renderStyle` to draw with lines
+  instead of textures. It redraws everything when the style changes.
+    - `TrackRenderSystem`: `'detailed'` (the default: textured track when
+      zoomed in, a line when zoomed out), `'centerline'` (a line along the
+      middle of each segment) or `'rails'` (a line along each rail, the
+      segment's gauge apart). The line styles show at every zoom level and
+      draw the previews the same way. They leave out ballast, beds,
+      shadows, catenary masts and tunnels, but keep the dashed marker over
+      underground track; highlights and snap dots are drawn as in
+      `'detailed'`.
+    - `StationRenderSystem` and `TrackAlignedPlatformRenderSystem`:
+      `'detailed'` (the default) or `'outline'`, which outlines each
+      platform. The two platforms that make up an island are outlined
+      separately, so a line runs down its middle.
+    - Lines are one pixel wide at any zoom, and the line styles need no
+      `textureRenderer`.
 - **Joint directions.**
   `new JointDirectionRenderSystem(host, trackGraph, preferenceMap, camera)`
   draws its indicators while the joint-direction tool is shown: call

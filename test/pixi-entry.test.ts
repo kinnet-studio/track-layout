@@ -11,7 +11,9 @@ import type {
     CurveCreationPreviewSource,
     DuplicateToSidePreviewSource,
     LayerHost,
+    PlatformRenderStyle,
     TerrainSampler,
+    TrackRenderStyle,
     TrackRenderSystemOptions,
     TrackTextureRenderer,
 } from '../src/pixi/index.js';
