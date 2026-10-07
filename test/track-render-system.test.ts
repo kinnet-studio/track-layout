@@ -1333,6 +1333,89 @@ describe('TrackRenderSystem: marks across joints', () => {
         expectSpans(xSpans(linesOf(host, 2)), [[99 + half, 200]]);
     });
 
+    it('carries no deck onto a bridge segment, whose parapets run its length', () => {
+        const layBridgeRun = (graph: TrackGraph) => {
+            layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+            graph.setSegmentStyle(1, { lineStyle: { preset: 'bridge' } });
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layBridgeRun(graph);
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        layBridgeRun(alone.graph);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
+
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+        // The deck on the first segment still ends at the joint, with no wing.
+        const first = parapetsOf(linesOf(host, 0));
+        expect(first).toHaveLength(2);
+        for (const parapet of first) {
+            expect(parapet.points[0]!.x).toBeCloseTo(99 - DECK - W, 6);
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(100, 6);
+            expect(Math.abs(parapet.points.at(-1)!.y)).toBeCloseTo(P, 6);
+        }
+    });
+
+    it('carries no gap onto a tunnel segment', () => {
+        const layTunnel = (graph: TrackGraph) => {
+            layTrack(graph, [A, B, C]);
+            graph.setSegmentStyle(1, { lineStyle: { preset: 'tunnel' } });
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTunnel(graph);
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        layTunnel(alone.graph);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+
+        expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+    });
+
+    it('carries no gap onto track that is below the terrain where the gap enters it', () => {
+        // The ground rises past x = 99.5, so the segment from B is buried.
+        const terrain: TerrainSampler = {
+            getHeight: x => (x > 99.5 ? 10 : -10),
+        };
+        const { host, graph, renderer } = scene({ terrain });
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, C]);
+        const alone = scene({ terrain });
+        alone.renderer.renderStyle = 'centerline';
+        layTrack(alone.graph, [A, B, C]);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+
+        // The first segment has its own gap (and a portal where it goes under).
+        const centreLine = linesOf(host, 0).filter(line =>
+            line.points.every(point => Math.abs(point.y) < 1e-9)
+        );
+        expectSpans(xSpans(centreLine), carriedGap[0]!);
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+    });
+
+    it('carries no deck onto a tunnel segment', () => {
+        const layTunnel = (graph: TrackGraph) => {
+            layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+            graph.setSegmentStyle(1, { lineStyle: { preset: 'tunnel' } });
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTunnel(graph);
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        layTunnel(alone.graph);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
+
+        expect(parapetsOf(linesOf(host, 0))).toHaveLength(2);
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+    });
+
     it('ends a deck at an open end with a wing', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';

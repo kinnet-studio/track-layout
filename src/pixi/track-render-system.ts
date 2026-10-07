@@ -968,34 +968,49 @@ export class TrackRenderSystem {
             }
             return span;
         });
-        spans.push(...this._carriedSpans(curveNumber, ends, length));
+        spans.push(...this._carriedSpans(curveNumber, segment, ends, length));
         return spans;
     }
 
     /**
      * The spans that the marks of the segments reached from each end of
-     * `curveNumber` put on it: what their overflow toward it has left once the
+     * `segment` put on it: what their overflow toward it has left once the
      * segments between are crossed. What is left past the far end gets a wing
-     * there when that end is open.
+     * there when that end is open. As with its own marks, nothing carries onto
+     * an end where the segment is underground, and no deck onto a `bridge`
+     * segment, whose parapets already run its length.
      */
     private _carriedSpans(
         curveNumber: number,
+        segment: TrackSegmentWithCollision,
         ends: LineTrackRecord['ends'],
         length: number
     ): MarkSpan[] {
         const spans: MarkSpan[] = [];
+        const { lineStyle } = segment;
+        const heights = heightsOf(segment);
+        const bridge = lineStyle?.preset === 'bridge';
         for (const enteringAt of ['start', 'end'] as const) {
             const from = enteringAt === 'start' ? 0 : 1;
+            const underground = isUnderground(
+                heights,
+                from,
+                ends[from]!.position,
+                lineStyle,
+                this._terrainData
+            );
+            if (underground) continue;
             this._walkJoints(
                 curveNumber,
                 ends[from]!,
-                ({ number, segment, facingStart, distance }) => {
+                ({ number, segment: reached, facingStart, distance }) => {
                     const towards = facingStart ? 'start' : 'end';
-                    const { marks } = this._crossingMarksOf(number, segment);
+                    const { marks } = this._crossingMarksOf(number, reached);
                     for (const mark of marks) {
+                        if (bridge && mark.kind === 'deck') continue;
                         const { overflow } = markSpan(
                             mark,
-                            segment.curve.fullLength
+                            reached.curve.fullLength
                         );
                         if (overflow[towards] <= distance) continue;
                         const { span, remaining } = carrySpan(
