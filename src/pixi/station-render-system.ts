@@ -8,6 +8,12 @@ import type { StationManager } from '../index.js';
 import type { Platform } from '../index.js';
 import type { StationPlacementPreview } from '../station-placement/preview.js';
 import type { LayerHost } from './layer-host.js';
+import {
+    PLATFORM_TEX_SIZE,
+    SAFETY_LINE_FRAC,
+    SAFETY_LINE_U,
+    SAFETY_LINE_WIDTH,
+} from './platform-texture.js';
 import type {
     PlatformRenderStyle,
     TrackTextureRenderer,
@@ -15,12 +21,6 @@ import type {
 
 /** World-space length per one repeat of the platform texture along the curve. */
 const PLATFORM_TEXTURE_TILE_LEN = 2;
-
-/** Resolution of the procedural platform texture (power-of-two for repeat wrap). */
-const PLATFORM_TEX_SIZE = 128;
-
-/** Yellow safety-line width as a fraction of the texture. */
-const SAFETY_LINE_FRAC = 0.06;
 
 type StationRenderRecord = {
     container: Container;
@@ -340,7 +340,10 @@ export class StationRenderSystem implements StationPlacementPreview {
 
     /**
      * Build a textured mesh for a single platform by sampling the adjacent
-     * track curve and extruding perpendicular to it.
+     * track curve and extruding perpendicular to it. Each cross-section has
+     * three vertices: the near edge, the inner edge of the safety line
+     * (SAFETY_LINE_WIDTH out, or the platform's whole width if narrower)
+     * and the far edge, so the line is as wide on every platform.
      */
     private _buildPlatformMesh(platform: Platform): MeshSimple | null {
         const texture = this._getOrCreatePlatformTexture();
@@ -351,6 +354,7 @@ export class StationRenderSystem implements StationPlacementPreview {
 
         const steps = Math.max(2, Math.ceil(curve.fullLength / 2));
         const { offset, width, side } = platform;
+        const lineReach = offset + Math.min(SAFETY_LINE_WIDTH, width);
 
         const verts: number[] = [];
         const uvs: number[] = [];
@@ -372,6 +376,10 @@ export class StationRenderSystem implements StationPlacementPreview {
             // Slight overlap (0.05) on the far edge prevents a visible seam where two
             // island-platform halves meet (their normals can diverge by a tiny amount).
             const nearEdge = { x: p.x + nx * offset, y: p.y + ny * offset };
+            const lineEdge = {
+                x: p.x + nx * lineReach,
+                y: p.y + ny * lineReach,
+            };
             const farEdge = {
                 x: p.x + nx * (offset + width + 0.05),
                 y: p.y + ny * (offset + width + 0.05),
@@ -390,16 +398,22 @@ export class StationRenderSystem implements StationPlacementPreview {
             // u=0 at near edge (safety line), u=1 at far edge (safety line).
             verts.push(nearEdge.x, nearEdge.y);
             uvs.push(0, v);
+            verts.push(lineEdge.x, lineEdge.y);
+            uvs.push(SAFETY_LINE_U, v);
             verts.push(farEdge.x, farEdge.y);
             uvs.push(1, v);
         }
 
-        // Build triangle indices (triangle strip as indexed triangles).
-        const vertexPairCount = verts.length / 4;
+        // Two strips per pair of cross-sections: the safety line, then the
+        // rest of the platform (indexed triangles).
+        const sectionCount = verts.length / 6;
         const indices: number[] = [];
-        for (let i = 0; i < vertexPairCount - 1; i++) {
-            const b = i * 2;
-            indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        for (let i = 0; i < sectionCount - 1; i++) {
+            for (let strip = 0; strip < 2; strip++) {
+                const a = i * 3 + strip;
+                const b = a + 3;
+                indices.push(a, a + 1, b, a + 1, b + 1, b);
+            }
         }
 
         if (indices.length === 0) return null;

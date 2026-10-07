@@ -12,6 +12,12 @@ import type {
     SingleSpinePlacementPreview,
 } from '../station-placement/preview.js';
 import type { LayerHost } from './layer-host.js';
+import {
+    PLATFORM_TEX_SIZE,
+    SAFETY_LINE_FRAC,
+    SAFETY_LINE_U,
+    SAFETY_LINE_WIDTH,
+} from './platform-texture.js';
 import type {
     PlatformRenderStyle,
     TrackTextureRenderer,
@@ -19,12 +25,6 @@ import type {
 
 /** World-space length per one repeat of the platform texture (tiling). */
 const PLATFORM_TEXTURE_TILE_LEN = 2;
-
-/** Resolution of the procedural platform texture (power-of-two for repeat wrap). */
-const PLATFORM_TEX_SIZE = 128;
-
-/** Yellow safety-line width as a fraction of the texture. */
-const SAFETY_LINE_FRAC = 0.06;
 
 // ---------------------------------------------------------------------------
 // Spine-relative UV helpers
@@ -60,6 +60,24 @@ function samplePolylineAtArcLength(
         }
     }
     return polyline[polyline.length - 1];
+}
+
+/**
+ * The inner edge of the safety line at one cross-section: `line`, which is
+ * SAFETY_LINE_WIDTH out from the spine point `spine` along its normal, or
+ * as far along that normal as the outer point `outer` reaches if that is
+ * less (and `spine` itself if the outer point is behind it).
+ */
+function safetyLineInnerPoint(spine: Point, line: Point, outer: Point): Point {
+    const nx = line.x - spine.x;
+    const ny = line.y - spine.y;
+    const lineWidth = Math.sqrt(nx * nx + ny * ny);
+    if (lineWidth < 1e-9) return spine;
+    const reach =
+        ((outer.x - spine.x) * nx + (outer.y - spine.y) * ny) / lineWidth;
+    if (reach >= lineWidth) return line;
+    const k = Math.max(0, reach) / lineWidth;
+    return { x: spine.x + nx * k, y: spine.y + ny * k };
 }
 
 /**
@@ -623,8 +641,14 @@ export class TrackAlignedPlatformRenderSystem
                 platform.offset,
                 this._getCurve
             );
+            const lineEdge = sampleSpineEdge(
+                platform.spine,
+                platform.offset + SAFETY_LINE_WIDTH,
+                this._getCurve
+            );
             return this._buildSingleSpineStripMesh(
                 trackEdge,
+                lineEdge,
                 platform.outerVertices,
                 texture
             );
@@ -636,10 +660,14 @@ export class TrackAlignedPlatformRenderSystem
     /**
      * Build a triangle-strip mesh for a single-spine platform.
      * Pairs each spine sample with a corresponding point on the outer edge
-     * (resampled by matching normalized arc-length).
+     * (resampled by matching normalized arc-length), with the inner edge of
+     * the safety line between them: `lineEdge`, sampled like the spine edge
+     * but SAFETY_LINE_WIDTH further out, or the outer point's reach if the
+     * platform is narrower there. So the line is as wide on every platform.
      */
     private _buildSingleSpineStripMesh(
         spineEdge: Point[],
+        lineEdge: Point[],
         outerVerts: Point[],
         texture: Texture
     ): MeshSimple | null {
@@ -669,6 +697,7 @@ export class TrackAlignedPlatformRenderSystem
                           t * totalOuterArc
                       )
                     : alignedOuter[0];
+            const lp = safetyLineInnerPoint(sp, lineEdge[i], op);
 
             const v = spineArcLens[i] / PLATFORM_TEXTURE_TILE_LEN;
 
@@ -676,16 +705,25 @@ export class TrackAlignedPlatformRenderSystem
             verts.push(sp.x, sp.y);
             uvs.push(0, v);
 
+            // Inner edge of the safety line.
+            verts.push(lp.x, lp.y);
+            uvs.push(SAFETY_LINE_U, v);
+
             // Far edge (outer): u < 1 so the wrapping safety line doesn't appear.
             verts.push(op.x, op.y);
             uvs.push(1 - SAFETY_LINE_FRAC, v);
         }
 
-        const pairCount = spineEdge.length;
+        // Two strips per pair of cross-sections: the safety line, then the
+        // rest of the platform (indexed triangles).
+        const sectionCount = spineEdge.length;
         const indices: number[] = [];
-        for (let i = 0; i < pairCount - 1; i++) {
-            const b = i * 2;
-            indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        for (let i = 0; i < sectionCount - 1; i++) {
+            for (let strip = 0; strip < 2; strip++) {
+                const a = i * 3 + strip;
+                const b = a + 3;
+                indices.push(a, a + 1, b, a + 1, b + 1, b);
+            }
         }
 
         if (indices.length === 0) return null;
