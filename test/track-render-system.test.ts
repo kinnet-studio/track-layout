@@ -1,5 +1,5 @@
 import { BCurve } from '@ue-too/curve';
-import type { Point } from '@ue-too/math';
+import { type Point, PointCal } from '@ue-too/math';
 import { describe, expect, it, spyOn } from 'bun:test';
 import { type Container, type Graphics, Texture } from 'pixi.js';
 
@@ -2006,3 +2006,364 @@ describe('TrackRenderSystem: marks across joints', () => {
         expect(host.bandKeys).toEqual(keys);
     });
 });
+
+for (const style of ['centerline', 'rails'] as const) {
+    describe(`TrackRenderSystem: shared bridges (${style})`, () => {
+        const GAP = P + 0.5; // half-gap at 90°
+        const DECK = 1.067 / 2 + 1.5; // half-deck at 90°
+        /** Lines a track draws besides its parapets. */
+        const LINES = style === 'rails' ? 2 : 1;
+        const linesOf = (host: RecordingLayerHost, n: number) =>
+            strokedLines(host.bandItem(`__simplified__${n}`));
+        /** A straight upper track across y = 0 at `x`, laid toward +y. */
+        const upper = (
+            graph: TrackGraph,
+            x: number,
+            elevation = ELEVATION.ABOVE_1
+        ) => layLine(graph, { x, y: -50 }, { x, y: 50 }, elevation);
+        /** The lower track, along y = 0. */
+        const lower = (graph: TrackGraph) =>
+            layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        /** The x of each parapet of a vertical track whose centre line is at `x`, sorted. */
+        const parapetXs = (host: RecordingLayerHost, n: number, x: number) =>
+            linesOf(host, n)
+                .map(line => line.points[1]!.x)
+                .filter(px => Math.abs(Math.abs(px - x) - P) < 1e-6)
+                .sort((a, b) => a - b);
+        const expectXs = (actual: number[], expected: number[]) => {
+            expect(actual).toHaveLength(expected.length);
+            expected.forEach((x, i) => expect(actual[i]).toBeCloseTo(x, 6));
+        };
+        /** The lower line's pieces as [min x, max x], one per piece whatever the style. */
+        const cutsOf = (host: RecordingLayerHost, n: number) => {
+            const spans = linesOf(host, n)
+                .map(line => [
+                    Math.min(...line.points.map(point => point.x)),
+                    Math.max(...line.points.map(point => point.x)),
+                ])
+                .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!);
+            return spans.filter(
+                (span, i) =>
+                    i === 0 ||
+                    Math.abs(span[0]! - spans[i - 1]![0]!) > 1e-6 ||
+                    Math.abs(span[1]! - spans[i - 1]![1]!) > 1e-6
+            );
+        };
+        const expectCuts = (
+            actual: number[][],
+            expected: [number, number][]
+        ) => {
+            expect(actual).toHaveLength(expected.length);
+            expected.forEach(([from, to], i) => {
+                expect(actual[i]![0]).toBeCloseTo(from, 6);
+                expect(actual[i]![1]).toBeCloseTo(to, 6);
+            });
+        };
+        function lineScene() {
+            const made = scene();
+            made.renderer.renderStyle = style;
+            return made;
+        }
+        /** A lower track with upper tracks at 48 and 52, 4 m apart. */
+        function sideBySide() {
+            const made = lineScene();
+            const h = lower(made.graph);
+            const u1 = upper(made.graph, 48);
+            const u2 = upper(made.graph, 52);
+            return { ...made, h, u1, u2 };
+        }
+        function expectSharedPair(
+            host: RecordingLayerHost,
+            h: number,
+            u1: number,
+            u2: number
+        ) {
+            expectXs(parapetXs(host, u1, 48), [48 - P]);
+            expectXs(parapetXs(host, u2, 52), [52 + P]);
+            for (const n of [u1, u2]) {
+                const parapet = linesOf(host, n).find(
+                    line => Math.abs(line.points[1]!.x - 50) > 3
+                )!;
+                expect(parapet.points[0]!.y).toBeCloseTo(-DECK - W, 6);
+                expect(parapet.points.at(-1)!.y).toBeCloseTo(DECK + W, 6);
+            }
+            expectCuts(cutsOf(host, h), [
+                [0, 48 - GAP],
+                [52 + GAP, 100],
+            ]);
+        }
+
+        it('draws side-by-side decks as one bridge', () => {
+            const { host, h, u1, u2 } = sideBySide();
+
+            expectSharedPair(host, h, u1, u2);
+        });
+
+        it('joins the gaps of a shared bridge', () => {
+            // 5.5 m apart: within 2P + 2, but further than 2 * GAP.
+            const { host, graph } = lineScene();
+            const h = lower(graph);
+            const u1 = upper(graph, 47.25);
+            const u2 = upper(graph, 52.75);
+
+            expect(parapetXs(host, u1, 47.25)).toHaveLength(1);
+            expect(parapetXs(host, u2, 52.75)).toHaveLength(1);
+            expectCuts(cutsOf(host, h), [
+                [0, 47.25 - GAP],
+                [52.75 + GAP, 100],
+            ]);
+        });
+
+        it('keeps decks 8 m apart as two bridges', () => {
+            const { host, graph } = lineScene();
+            const h = lower(graph);
+            const u1 = upper(graph, 46);
+            const u2 = upper(graph, 54);
+
+            expectXs(parapetXs(host, u1, 46), [46 - P, 46 + P]);
+            expectXs(parapetXs(host, u2, 54), [54 - P, 54 + P]);
+            expect(cutsOf(host, h)).toHaveLength(3);
+        });
+
+        it('keeps decks at different levels apart', () => {
+            const { host, graph } = lineScene();
+            lower(graph);
+            const u1 = upper(graph, 48);
+            const u2 = upper(graph, 52, ELEVATION.ABOVE_2);
+
+            expect(parapetXs(host, u1, 48)).toHaveLength(2);
+            expect(parapetXs(host, u2, 52)).toHaveLength(2);
+        });
+
+        it('draws no parapets on the middle of three', () => {
+            const { host, graph } = lineScene();
+            const h = lower(graph);
+            const u1 = upper(graph, 46);
+            const u2 = upper(graph, 50);
+            const u3 = upper(graph, 54);
+
+            expect(parapetXs(host, u2, 50)).toHaveLength(0);
+            expectXs(parapetXs(host, u1, 46), [46 - P]);
+            expectXs(parapetXs(host, u3, 54), [54 + P]);
+            expectCuts(cutsOf(host, h), [
+                [0, 46 - GAP],
+                [54 + GAP, 100],
+            ]);
+        });
+
+        it('brings back the inner parapet when a neighbour is removed', () => {
+            const { host, graph, u1, u2 } = sideBySide();
+            expectXs(parapetXs(host, u1, 48), [48 - P]);
+
+            graph.removeTrackSegment(u2);
+
+            expectXs(parapetXs(host, u1, 48), [48 - P, 48 + P]);
+        });
+
+        it('leaves out the inner parapet when a neighbour is added', () => {
+            const { host, graph } = lineScene();
+            lower(graph);
+            const u1 = upper(graph, 48);
+            expect(parapetXs(host, u1, 48)).toHaveLength(2);
+
+            upper(graph, 52);
+
+            expectXs(parapetXs(host, u1, 48), [48 - P]);
+        });
+
+        it('brings back the inner parapet when a neighbour becomes a tunnel or a bridge', () => {
+            const { host, graph, u1, u2 } = sideBySide();
+            expectXs(parapetXs(host, u1, 48), [48 - P]);
+
+            graph.setSegmentStyle(u2, { lineStyle: { preset: 'tunnel' } });
+            expect(parapetXs(host, u1, 48)).toHaveLength(2);
+
+            graph.setSegmentStyle(u2, { lineStyle: undefined });
+            expectXs(parapetXs(host, u1, 48), [48 - P]);
+
+            graph.setSegmentStyle(u2, { lineStyle: { preset: 'bridge' } });
+            expect(parapetXs(host, u1, 48)).toHaveLength(2);
+        });
+
+        it('merges the branches of a junction that diverge over the track', () => {
+            const { host, graph } = lineScene();
+            const j0 = graph.createNewEmptyJoint(
+                { x: 50, y: -40 },
+                { x: 0, y: 1 },
+                ELEVATION.ABOVE_1
+            );
+            const j1 = graph.createNewEmptyJoint(
+                { x: 50, y: 20 },
+                { x: 0, y: 1 },
+                ELEVATION.ABOVE_1
+            );
+            const j2 = graph.createNewEmptyJoint(
+                { x: 60, y: 20 },
+                PointCal.unitVector({ x: 10, y: 30 }),
+                ELEVATION.ABOVE_1
+            );
+            expect(graph.connectJoints(j0, j1, [{ x: 50, y: -10 }])).toBe(true);
+            expect(graph.connectJoints(j0, j2, [{ x: 50, y: -10 }])).toBe(true);
+            const b1 = graph.getJoint(j0)!.connections.get(j1)!;
+            const b2 = graph.getJoint(j0)!.connections.get(j2)!;
+
+            // b2 crosses y = 0 at x ≈ 54.44, about 12.5° off b1.
+            const h = lower(graph);
+
+            expectXs(parapetXs(host, b1, 50), [50 - P]);
+            expect(linesOf(host, b2)).toHaveLength(LINES + 1);
+            expect(cutsOf(host, h)).toHaveLength(2);
+        });
+
+        it('merges tracks laid in opposite directions', () => {
+            const { host, graph } = lineScene();
+            lower(graph);
+            const u1 = upper(graph, 48);
+            const u2 = layLine(
+                graph,
+                { x: 52, y: 50 },
+                { x: 52, y: -50 },
+                ELEVATION.ABOVE_1
+            );
+
+            expectXs(parapetXs(host, u1, 48), [48 - P]);
+            expectXs(parapetXs(host, u2, 52), [52 + P]);
+        });
+
+        it('merges decks when the lower track is laid last', () => {
+            const { host, graph } = lineScene();
+            const u1 = upper(graph, 48);
+            const u2 = upper(graph, 52);
+
+            const h = lower(graph);
+
+            expectSharedPair(host, h, u1, u2);
+        });
+
+        it('keeps two decks where the upper tracks cross over the lower track', () => {
+            const { host, graph } = lineScene();
+            lower(graph);
+            const u1 = layLine(
+                graph,
+                { x: 40, y: -50 },
+                { x: 60, y: 50 },
+                ELEVATION.ABOVE_1
+            );
+            const u2 = layLine(
+                graph,
+                { x: 60, y: -50 },
+                { x: 40, y: 50 },
+                ELEVATION.ABOVE_1
+            );
+
+            expect(linesOf(host, u1)).toHaveLength(LINES + 2);
+            expect(linesOf(host, u2)).toHaveLength(LINES + 2);
+        });
+
+        it('keeps two decks where the upper tracks cross each other on the bridge', () => {
+            // A diamond centred 1 m from the lower track, its tracks 30° either
+            // side of +y: they cross the lower track 1.15 m apart.
+            const { host, graph } = lineScene();
+            lower(graph);
+            const [dx, dy] = [25, 50 * Math.cos(Math.PI / 6)];
+            const u1 = layLine(
+                graph,
+                { x: 50 - dx, y: -1 - dy },
+                { x: 50 + dx, y: -1 + dy },
+                ELEVATION.ABOVE_1
+            );
+            const u2 = layLine(
+                graph,
+                { x: 50 + dx, y: -1 - dy },
+                { x: 50 - dx, y: -1 + dy },
+                ELEVATION.ABOVE_1
+            );
+
+            expect(linesOf(host, u1)).toHaveLength(LINES + 2);
+            expect(linesOf(host, u2)).toHaveLength(LINES + 2);
+        });
+
+        /**
+         * An upper track at `x` in two segments joined at y = 1, so its deck
+         * (half-length DECK, about 2.03 m) runs 1.03 m past the joint. The
+         * top segment runs toward -y when `reversed`. Returns [bottom, top].
+         */
+        function splitUpper(graph: TrackGraph, x: number, reversed = false) {
+            const [low, mid, high] = [-50, 1, 50].map(y =>
+                graph.createNewEmptyJoint(
+                    { x, y },
+                    { x: 0, y: 1 },
+                    ELEVATION.ABOVE_1
+                )
+            ) as [number, number, number];
+            expect(graph.connectJoints(low, mid, [{ x, y: -24.5 }])).toBe(true);
+            const bottom = graph.getJoint(low)!.connections.get(mid)!;
+            const [from, to] = reversed ? [high, mid] : [mid, high];
+            expect(graph.connectJoints(from, to, [{ x, y: 25.5 }])).toBe(true);
+            return [bottom, graph.getJoint(from)!.connections.get(to)!];
+        }
+        /** The parapet of track `n` at `x`. */
+        const parapetAt = (host: RecordingLayerHost, n: number, x: number) =>
+            linesOf(host, n).find(
+                line => Math.abs(line.points[1]!.x - x) < 1e-6
+            )!;
+
+        it('keeps the shared side on a deck carried across a joint', () => {
+            const { host, graph } = lineScene();
+            lower(graph);
+            const [bottom1, top1] = splitUpper(graph, 48);
+            const [bottom2, top2] = splitUpper(graph, 52);
+
+            expectXs(parapetXs(host, bottom1!, 48), [48 - P]);
+            expectXs(parapetXs(host, bottom2!, 52), [52 + P]);
+            expectXs(parapetXs(host, top1!, 48), [48 - P]);
+            expectXs(parapetXs(host, top2!, 52), [52 + P]);
+            for (const [n, x] of [
+                [top1!, 48 - P],
+                [top2!, 52 + P],
+            ] as const) {
+                const parapet = parapetAt(host, n, x);
+                expect(parapet.points[0]!.y).toBeCloseTo(1, 6);
+                expect(parapet.points.at(-1)!.y).toBeCloseTo(DECK + W, 6);
+            }
+        });
+
+        it('swaps the shared side for a segment laid the other way', () => {
+            const { host, graph } = lineScene();
+            lower(graph);
+            splitUpper(graph, 48);
+            const [, top2] = splitUpper(graph, 52, true);
+
+            expectXs(parapetXs(host, top2!, 52), [52 + P]);
+        });
+
+        it('keeps two decks when a lower-track joint lies between them', () => {
+            const { host, graph } = lineScene();
+            layTrack(graph, [
+                { x: 0, y: 0 },
+                { x: 50, y: 0 },
+                { x: 100, y: 0 },
+            ]);
+            const u1 = upper(graph, 48);
+            const u2 = upper(graph, 52);
+
+            expect(parapetXs(host, u1, 48)).toHaveLength(2);
+            expect(parapetXs(host, u2, 52)).toHaveLength(2);
+        });
+
+        it('draws a shared bridge the same after loading a saved layout', async () => {
+            const source = new TrackGraph();
+            const h = lower(source);
+            const u1 = upper(source, 48);
+            const u2 = upper(source, 52);
+            const saved = source.serialize();
+            const { host, graph } = lineScene();
+
+            await graph.loadFromSerializedData(saved, {
+                yieldToFrame: async () => {},
+            });
+
+            expectSharedPair(host, h, u1, u2);
+        });
+    });
+}

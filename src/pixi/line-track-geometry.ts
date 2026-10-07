@@ -33,6 +33,19 @@ export const DECK_CLEARANCE = 1.5;
 export const GAP_CLEARANCE = 0.5;
 
 /**
+ * The most space (metres) between the inner parapets of two decks side by side
+ * over the same track for them to be drawn as one bridge.
+ */
+export const SHARED_BRIDGE_SPACE = 2;
+
+/**
+ * Two tracks whose crossings of the same lower track are closer than this
+ * (metres) meet over it, at a junction or a crossing on the bridge. Which side
+ * of each faces the other isn't defined there, so they keep their own decks.
+ */
+export const SHARED_BRIDGE_MIN_APART = 0.5;
+
+/**
  * A crossing mark never reaches further than this (metres) from its track, so
  * it is also how far the renderer walks along the joints to carry a mark onto
  * the next segments, and the most `bridgeGapClearance` can be.
@@ -328,6 +341,92 @@ export function crossingMark(
     };
 }
 
+/** A track that crosses over a lower segment with a deck, as the lower segment sees it. */
+export type OverCrossing = {
+    /** The upper segment. */
+    segment: number;
+    /** Where it crosses the lower segment. */
+    point: Point;
+    /** Arc length of the crossing along the lower segment. */
+    s: number;
+    /** The upper track's unit normal at the crossing: its tangent turned a quarter turn toward +y. */
+    normal: Point;
+    gauge: number;
+    /** The upper track's height at the crossing, in metres. */
+    height: number;
+    /** How far (m) the upper track's deck reaches each way from the crossing. */
+    reach: number;
+};
+
+/**
+ * Two neighbouring decks over one lower segment that make one bridge: each
+ * with the side of its own normal (+1 or −1) that faces the other.
+ */
+export type SharedBridgePair = {
+    a: { segment: number; s: number; side: 1 | -1 };
+    b: { segment: number; s: number; side: 1 | -1 };
+};
+
+/**
+ * Whether the centre lines of `a` and `b`, continued straight from where they
+ * cross the lower track (`delta` apart), meet within either one's deck.
+ */
+function meetOnTheDecks(
+    a: OverCrossing,
+    b: OverCrossing,
+    delta: Point
+): boolean {
+    const tangentA = { x: a.normal.y, y: -a.normal.x };
+    const tangentB = { x: b.normal.y, y: -b.normal.x };
+    const cross = (p: Point, q: Point) => p.x * q.y - p.y * q.x;
+    const turn = cross(tangentA, tangentB);
+    if (Math.abs(turn) < PARALLEL_SIN) return false;
+    const alongA = cross(delta, tangentB) / turn;
+    const alongB = cross(delta, tangentA) / turn;
+    return Math.abs(alongA) <= a.reach || Math.abs(alongB) <= b.reach;
+}
+
+/**
+ * The pairs of decks over one lower segment that share a bridge. Only
+ * neighbours along the lower segment are compared, so in a run of three the
+ * middle one pairs with each outer one. Two neighbours share when they are
+ * within {@link VERTICAL_CLEARANCE} of each other's height, their crossings are
+ * at least {@link SHARED_BRIDGE_MIN_APART} apart, and the space between their
+ * parapets is at most {@link SHARED_BRIDGE_SPACE}. That space is measured
+ * across each track and the smaller taken, so the answer is the same from
+ * either track, and diverging tracks are judged where they are closest.
+ * Tracks whose centre lines, continued straight from the crossings, meet
+ * within either deck don't share: they cross or join on the bridge, so which
+ * side of each faces the other changes along it.
+ */
+export function sharedBridgePairs(
+    over: readonly OverCrossing[]
+): SharedBridgePair[] {
+    const sorted = [...over].sort((a, b) => a.s - b.s || a.segment - b.segment);
+    const pairs: SharedBridgePair[] = [];
+    for (let i = 0; i + 1 < sorted.length; i++) {
+        const a = sorted[i]!;
+        const b = sorted[i + 1]!;
+        if (Math.abs(a.height - b.height) >= VERTICAL_CLEARANCE) continue;
+        const delta = PointCal.subVector(b.point, a.point);
+        if (PointCal.magnitude(delta) < SHARED_BRIDGE_MIN_APART) continue;
+        if (meetOnTheDecks(a, b, delta)) continue;
+        const acrossA = PointCal.dotProduct(delta, a.normal);
+        const acrossB = PointCal.dotProduct(delta, b.normal);
+        const spacing = Math.min(Math.abs(acrossA), Math.abs(acrossB));
+        const limit =
+            parapetOffset(a.gauge) +
+            parapetOffset(b.gauge) +
+            SHARED_BRIDGE_SPACE;
+        if (spacing > limit) continue;
+        pairs.push({
+            a: { segment: a.segment, s: a.s, side: acrossA >= 0 ? 1 : -1 },
+            b: { segment: b.segment, s: b.s, side: -acrossB >= 0 ? 1 : -1 },
+        });
+    }
+    return pairs;
+}
+
 /**
  * A deck or gap over [`from`, `to`] of a segment's arc length, with a wing flag
  * for each end of a deck.
@@ -338,6 +437,12 @@ export type MarkSpan = {
     to: number;
     /** A deck's wing at `from` / `to`; ignored for gaps. */
     wings: { start: boolean; end: boolean };
+    /**
+     * A deck's sides whose parapet is left out, because a neighbouring deck
+     * shares the bridge there: `positive` is the side the normal points to.
+     * Ignored for gaps. None when omitted.
+     */
+    shared?: { positive: boolean; negative: boolean };
 };
 
 /** `amount` as a length that carries on, or 0 when it is only float noise. */
@@ -377,33 +482,35 @@ export function markSpan(
  * the far side is true when nothing is left over (float noise is nothing),
  * since the deck ends inside this segment. When something is left, that flag
  * starts false, and the caller resolves it as it does for {@link markSpan}.
+ * A deck's `shared` sides carry over as given; the caller swaps them when the
+ * neighbour runs the other way.
  */
 export function carrySpan(
     kind: MarkSpan['kind'],
     overflow: number,
     length: number,
-    enteringAt: 'start' | 'end'
+    enteringAt: 'start' | 'end',
+    shared?: MarkSpan['shared']
 ): { span: MarkSpan; remaining: number } {
     const covered = Math.min(overflow, length);
     const remaining = aboveNoise(overflow - length);
     const farWing = remaining === 0;
-    return {
-        span:
-            enteringAt === 'start'
-                ? {
-                      kind,
-                      from: 0,
-                      to: covered,
-                      wings: { start: false, end: farWing },
-                  }
-                : {
-                      kind,
-                      from: length - covered,
-                      to: length,
-                      wings: { start: farWing, end: false },
-                  },
-        remaining,
-    };
+    const span: MarkSpan =
+        enteringAt === 'start'
+            ? {
+                  kind,
+                  from: 0,
+                  to: covered,
+                  wings: { start: false, end: farWing },
+              }
+            : {
+                  kind,
+                  from: length - covered,
+                  to: length,
+                  wings: { start: farWing, end: false },
+              };
+    if (shared !== undefined) span.shared = { ...shared };
+    return { span, remaining };
 }
 
 /** What a segment sees of another one that meets it at a joint. */
@@ -638,9 +745,13 @@ function mergedSpans(spans: MarkSpan[], kind: MarkSpan['kind']): MarkSpan[] {
     return merged;
 }
 
-/** The gap spans as merged arc-length intervals clamped to the segment. */
-function gapIntervals(spans: MarkSpan[], length: number): [number, number][] {
-    return mergedSpans(spans, 'gap')
+/** The spans of one kind as merged arc-length intervals clamped to the segment. */
+function spanIntervals(
+    spans: MarkSpan[],
+    kind: MarkSpan['kind'],
+    length: number
+): [number, number][] {
+    return mergedSpans(spans, kind)
         .map((span): [number, number] => [
             Math.max(0, span.from),
             Math.min(length, span.to),
@@ -709,7 +820,7 @@ function wingStroke(
  * above- and below-ground runs, each cut by its pattern and by the gaps under
  * any decks; a portal wherever the track meets the ground; the parapets of a
  * `bridge` preset and of the decks over other tracks (decks that overlap are
- * one); and the portals of a `tunnel` preset's run ends. Marks are solid, and
+ * one, and a side a neighbouring deck shares has none); and the portals of a `tunnel` preset's run ends. Marks are solid, and
  * take the colour of the run they sit on, except that portals always take the
  * above-ground colour. Gaps cut lines and parapets, never wings or portals: a
  * wing at a run end that a gap has taken from its parapet is drawn on its own.
@@ -724,7 +835,7 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
     const length = samples[samples.length - 1]!.s;
     const { runs, crossings } = splitRuns(input, length);
     const marks = input.marks ?? [];
-    const gaps = gapIntervals(marks, length);
+    const gaps = spanIntervals(marks, 'gap', length);
     const runEnds = input.runEnds ?? { start: false, end: false };
     const offsets = renderStyle === 'rails' ? [-gauge / 2, gauge / 2] : [0];
     const parapets = [-parapetOffset(gauge), parapetOffset(gauge)];
@@ -803,26 +914,49 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
         }
     }
 
+    // Where a neighbouring deck shares a side, that side has no parapet.
+    const sharedOn = parapets.map(offset =>
+        spanIntervals(
+            marks.filter(
+                span => span.shared?.[offset > 0 ? 'positive' : 'negative']
+            ),
+            'deck',
+            length
+        )
+    );
     for (const deck of mergedSpans(marks, 'deck')) {
         const from = Math.max(0, deck.from);
         const to = Math.min(length, deck.to);
         if (!(to - from > EMPTY_INTERVAL)) continue;
-        const centre = (from + to) / 2;
-        const run = runs.find(r => centre <= r.s1) ?? runs[runs.length - 1]!;
-        // A wing is drawn where the span says: a deck that goes on past the
-        // segment's end has none there.
-        for (const offset of parapets) {
-            strokes.push(
-                parapetStroke(
-                    samples,
-                    from,
-                    to,
-                    offset,
-                    deck.wings,
-                    colorOf(run)
-                )
-            );
-        }
+        parapets.forEach((offset, i) => {
+            for (const [pieceFrom, pieceTo] of subtractGaps(
+                from,
+                to,
+                sharedOn[i]!
+            )) {
+                const centre = (pieceFrom + pieceTo) / 2;
+                const run =
+                    runs.find(r => centre <= r.s1) ?? runs[runs.length - 1]!;
+                // A wing is drawn where the span says: a deck that goes on
+                // past the segment's end has none there, and neither has an
+                // end left where a shared stretch is cut out.
+                const wings = {
+                    start:
+                        deck.wings.start && pieceFrom - from <= EMPTY_INTERVAL,
+                    end: deck.wings.end && to - pieceTo <= EMPTY_INTERVAL,
+                };
+                strokes.push(
+                    parapetStroke(
+                        samples,
+                        pieceFrom,
+                        pieceTo,
+                        offset,
+                        wings,
+                        colorOf(run)
+                    )
+                );
+            }
+        });
     }
 
     if (style.preset === 'tunnel') {

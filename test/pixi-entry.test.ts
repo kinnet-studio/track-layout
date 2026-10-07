@@ -79,6 +79,7 @@ describe('pixi entry point', () => {
             'classifyCrossing',
             'markSpan',
             'carrySpan',
+            'sharedBridgePairs',
         ]) {
             expect(pixi).not.toHaveProperty(name);
         }

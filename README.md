@@ -168,8 +168,11 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       other track, which is cut beneath it, and underground track as
       lighter, broken lines with a portal where it reaches the surface. A
       deck or gap near a joint carries on across it, onto every segment
-      there (all the branches at a junction). Highlights and snap dots are
-      drawn as in `'detailed'`.
+      there (all the branches at a junction). Tracks side by side over the
+      same track, at the same level and with no more than 2 m between
+      their parapets, share one bridge: only the outer parapets are drawn,
+      and the gap beneath runs unbroken. Highlights and snap dots are drawn
+      as in `'detailed'`.
         - Each segment's `lineStyle` (`{ preset?, pattern?, color?, width? }`,
           saved with the layout) changes how the line styles draw it.
           Presets are `tunnel` (drawn and treated as underground), `bridge`

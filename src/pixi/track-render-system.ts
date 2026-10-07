@@ -37,16 +37,20 @@ import {
     type LineTrackInput,
     MAX_MARK_HALF_LENGTH,
     type MarkSpan,
+    type OverCrossing,
     RESTROKE_ZOOM_STEP,
     type RunEndNeighbour,
+    SHARED_BRIDGE_MIN_APART,
     buildLineTrack,
     buriedByTerrain,
     carrySpan,
     crossingMark,
+    heightAt,
     isUnderground,
     markSpan,
     needsRunEndMark,
     sampleLine,
+    sharedBridgePairs,
 } from './line-track-geometry.js';
 import type {
     CatenaryLayoutPreviewSource,
@@ -119,12 +123,20 @@ const boxesOverlap = (a: Box, b: Box): boolean =>
     b.min.y <= a.max.y + BOX_SLACK;
 
 /**
- * What a segment's crossings put on it, and who crosses it. Cached, so it is
- * never changed once found.
+ * A mark a segment's own crossing puts on it, with the segment it crosses and
+ * the arc length of the crossing along that segment.
+ */
+type OwnMark = CrossingMark & { other: number; otherS: number };
+
+/**
+ * What a segment's crossings put on it, who crosses it, and the tracks that
+ * cross over it with a deck, for working out which of those share a bridge.
+ * Cached, so it is never changed once found.
  */
 type CrossingMarks = {
-    marks: readonly CrossingMark[];
+    marks: readonly OwnMark[];
     partners: ReadonlySet<number>;
+    over: readonly OverCrossing[];
 };
 
 /**
@@ -962,8 +974,9 @@ export class TrackRenderSystem {
         curveNumber: number,
         segment: TrackSegmentWithCollision
     ): CrossingMarks {
-        const marks: CrossingMark[] = [];
+        const marks: OwnMark[] = [];
         const partners = new Set<number>();
+        const over: OverCrossing[] = [];
         const renderStyle = this._lineRenderStyle();
         const heights = heightsOf(segment);
         for (const crossing of this._trackCurveManager.getCrossings(
@@ -995,24 +1008,88 @@ export class TrackRenderSystem {
                 renderStyle,
                 this._bridgeGapClearance
             );
-            if (mark !== null) marks.push(mark);
+            if (mark === null) continue;
+            marks.push({
+                ...mark,
+                other: crossing.otherSegment,
+                otherS: other.curve.lengthAtT(crossing.otherT),
+            });
+            // A gap here is a deck on the other track, unless that track is a
+            // `bridge` segment, which draws no deck and shares none.
+            if (mark.kind === 'gap' && other.lineStyle?.preset !== 'bridge') {
+                const tangent = PointCal.unitVector(
+                    other.curve.derivative(crossing.otherT)
+                );
+                const deck = crossingMark(
+                    across,
+                    self,
+                    this._terrainData,
+                    renderStyle,
+                    this._bridgeGapClearance
+                );
+                over.push({
+                    segment: crossing.otherSegment,
+                    point: segment.curve.get(crossing.t),
+                    s: mark.s,
+                    normal: { x: -tangent.y, y: tangent.x },
+                    gauge: other.gauge,
+                    height: heightAt(across.heights, crossing.otherT),
+                    reach: deck?.halfLength ?? 0,
+                });
+            }
         }
-        return { marks, partners };
+        return { marks, partners, over };
+    }
+
+    /**
+     * The sides of `curveNumber`'s deck `mark` that a neighbouring deck over
+     * the same lower segment shares, from that segment's own list of the
+     * tracks over it, so that the bridge and the gap beneath it always agree.
+     * Undefined when no side is shared or the lower segment is gone.
+     */
+    private _sharedSides(
+        curveNumber: number,
+        mark: OwnMark
+    ): MarkSpan['shared'] | undefined {
+        const lower = this._trackCurveManager.getTrackSegmentWithJoints(
+            mark.other
+        );
+        if (lower === null) return undefined;
+        const shared = { positive: false, negative: false };
+        const { over } = this._crossingMarksOf(mark.other, lower);
+        for (const pair of sharedBridgePairs(over)) {
+            for (const deck of [pair.a, pair.b]) {
+                if (
+                    deck.segment === curveNumber &&
+                    Math.abs(deck.s - mark.otherS) < SHARED_BRIDGE_MIN_APART
+                ) {
+                    if (deck.side === 1) shared.positive = true;
+                    else shared.negative = true;
+                }
+            }
+        }
+        return shared.positive || shared.negative ? shared : undefined;
     }
 
     /**
      * The decks and gaps drawn on `segment`: the ones its own crossings put
      * on it, and the part of those on the segments within reach along its
      * joints that carries on across them. A deck gets a wing only where it
-     * ends: inside the segment, or at an open end. It also sets who crosses
-     * `segment` in `_linePartners`, from its own crossings only.
+     * ends: inside the segment, or at an open end, and no parapet on a side
+     * that a neighbouring deck shares. Where two decks over `segment` share
+     * a bridge, the gap beneath runs unbroken between their crossings. It
+     * also sets who crosses `segment` in `_linePartners`, from its own
+     * crossings only.
      */
     private _markSpans(
         curveNumber: number,
         segment: TrackSegmentWithCollision,
         ends: LineTrackRecord['ends']
     ): MarkSpan[] {
-        const { marks, partners } = this._crossingMarksOf(curveNumber, segment);
+        const { marks, partners, over } = this._crossingMarksOf(
+            curveNumber,
+            segment
+        );
         this._linePartners.set(curveNumber, new Set(partners));
         for (const partner of partners) {
             const theirs = this._linePartners.get(partner) ?? new Set<number>();
@@ -1029,8 +1106,20 @@ export class TrackRenderSystem {
             if (overflow.end > 0 && this._isOpenEnd(curveNumber, ends[1]!)) {
                 span.wings.end = true;
             }
+            if (mark.kind === 'deck') {
+                const shared = this._sharedSides(curveNumber, mark);
+                if (shared !== undefined) span.shared = shared;
+            }
             return span;
         });
+        for (const { a, b } of sharedBridgePairs(over)) {
+            spans.push({
+                kind: 'gap',
+                from: a.s,
+                to: b.s,
+                wings: { start: false, end: false },
+            });
+        }
         spans.push(...this._carriedSpans(curveNumber, segment, ends, length));
         return spans;
     }
@@ -1039,9 +1128,10 @@ export class TrackRenderSystem {
      * The spans that the marks of the segments reached from each end of
      * `segment` put on it: what their overflow toward it has left once the
      * segments between are crossed. What is left past the far end gets a wing
-     * there when that end is open. As with its own marks, nothing carries onto
-     * an end where the segment is underground, and no deck onto a `bridge`
-     * segment, whose parapets already run its length.
+     * there when that end is open, and a deck keeps the sides it shares with
+     * a neighbouring deck. As with its own marks, nothing carries onto an end
+     * where the segment is underground, and no deck onto a `bridge` segment,
+     * whose parapets already run its length.
      */
     private _carriedSpans(
         curveNumber: number,
@@ -1080,7 +1170,14 @@ export class TrackRenderSystem {
                             mark.kind,
                             overflow[towards] - distance,
                             length,
-                            enteringAt
+                            enteringAt,
+                            mark.kind === 'deck'
+                                ? this._carriedSharedSides(
+                                      number,
+                                      mark,
+                                      facingStart === (enteringAt === 'end')
+                                  )
+                                : undefined
                         );
                         const far = ends[1 - from]!;
                         if (
@@ -1096,6 +1193,24 @@ export class TrackRenderSystem {
             );
         }
         return spans;
+    }
+
+    /**
+     * The shared sides of the deck `mark` on segment `number`, as seen from a
+     * segment it carries onto: as they are when the two run the same way, and
+     * swapped when they run opposite ways, since each side is named after its
+     * own segment's normal. The joint walk keeps one direction, so they run
+     * the same way exactly when the segment reached faces the walk with its
+     * start while the walk leaves the drawn segment's end, or the reverse.
+     */
+    private _carriedSharedSides(
+        number: number,
+        mark: OwnMark,
+        sameWay: boolean
+    ): MarkSpan['shared'] | undefined {
+        const shared = this._sharedSides(number, mark);
+        if (shared === undefined || sameWay) return shared;
+        return { positive: shared.negative, negative: shared.positive };
     }
 
     /**
@@ -1246,7 +1361,9 @@ export class TrackRenderSystem {
      * ones that cross it, which get or lose a deck or a gap, the `tunnel` and
      * `bridge` segments at its ends, which get or lose a portal or wings, and
      * the segments within reach along the joints of it and of its partners,
-     * which get or lose the part of a deck or gap that carries across. A
+     * which get or lose the part of a deck or gap that carries across, and
+     * the other tracks that cross its partners, with the segments within
+     * reach of them, whose decks can gain or lose a side shared with it. A
      * segment that isn't drawn is skipped, which is what lets track load in any
      * order.
      */
@@ -1261,11 +1378,18 @@ export class TrackRenderSystem {
             ...this._presetNeighbours(curveNumber, ends),
             ...this._reachOf(curveNumber, ends),
         ]);
+        const addWithReach = (number: number) => {
+            affected.add(number);
+            const theirEnds = this._endsOf(number);
+            if (theirEnds === null) return;
+            for (const reached of this._reachOf(number, theirEnds)) {
+                affected.add(reached);
+            }
+        };
         for (const partner of partnerList) {
-            const theirEnds = this._endsOf(partner);
-            if (theirEnds === null) continue;
-            for (const number of this._reachOf(partner, theirEnds)) {
-                affected.add(number);
+            addWithReach(partner);
+            for (const across of this._linePartners.get(partner) ?? []) {
+                if (across !== curveNumber) addWithReach(across);
             }
         }
         affected.delete(curveNumber);
