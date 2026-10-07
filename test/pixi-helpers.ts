@@ -39,8 +39,17 @@ export function drawKey(segment: number, start = 0, end = 1): string {
     });
 }
 
-/** One line a graphics object strokes: a `moveTo` and the points after it. */
-export type StrokedLine = { points: Point[]; closed: boolean };
+/**
+ * One line a graphics object strokes: a `moveTo` and the points after it,
+ * with the colour, width and `pixelLine` flag of the stroke it belongs to.
+ */
+export type StrokedLine = {
+    points: Point[];
+    closed: boolean;
+    color: number;
+    width: number;
+    pixelLine: boolean;
+};
 
 /** Every graphics object in `container`'s subtree, itself included. */
 function graphicsIn(container: Container | undefined): Graphics[] {
@@ -55,11 +64,15 @@ export function strokedLines(container: Container | undefined): StrokedLine[] {
     for (const graphics of graphicsIn(container)) {
         for (const instruction of graphics.context.instructions) {
             if (instruction.action !== 'stroke') continue;
+            const { color, width, pixelLine } = instruction.data.style;
             for (const { action, data } of instruction.data.path.instructions) {
                 if (action === 'moveTo') {
                     lines.push({
                         points: [{ x: data[0], y: data[1] }],
                         closed: false,
+                        color,
+                        width,
+                        pixelLine,
                     });
                 } else if (action === 'lineTo') {
                     lines.at(-1)!.points.push({ x: data[0], y: data[1] });

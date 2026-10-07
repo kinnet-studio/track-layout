@@ -1,6 +1,6 @@
 import { BCurve } from '@ue-too/curve';
 import type { Point } from '@ue-too/math';
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { type Container, type Graphics, Texture } from 'pixi.js';
 
 import {
@@ -30,6 +30,8 @@ const A = { x: 0, y: 0 };
 const B = { x: 100, y: 0 };
 const C = { x: 200, y: 0 };
 const KEY = drawKey(0);
+/** Distance from a track's centre line to its portal bars, for gauge 1.067. */
+const P = 1.067 / 2 + 1.5;
 
 /** A renderer on a fresh graph, with the texture stub unless options say otherwise. */
 function scene(options: TrackRenderSystemOptions = {}) {
@@ -575,15 +577,174 @@ describe('TrackRenderSystem: line styles', () => {
         expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(2);
     });
 
-    it('keeps the dashed marker on underground track at every zoom level', async () => {
-        const { host, graph, camera, renderer } = scene();
+    it('draws underground track lighter and dashed, with no overlay', () => {
+        const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
 
         layTrack(graph, [A, B], ELEVATION.SUB_1);
-        await zoomTo(camera, 10);
 
-        expect(host.bandKeys).toEqual(['__simplified__0', '__underground__0']);
-        expect(host.bandItem('__underground__0')!.visible).toBe(true);
+        expect(host.bandKeys).toEqual(['__simplified__0']);
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines.length).toBeGreaterThan(1);
+        for (const line of lines) {
+            expect(line.color).toBe(0x808080);
+        }
+    });
+
+    it('draws a ramp solid above ground and dashed below, with a portal', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        layRamp(graph, ELEVATION.SUB_1, ELEVATION.ABOVE_1);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        const black = lines.filter(line => line.color === 0x000000);
+        expect(black).toHaveLength(2);
+        // The portal's bar runs across the track; the line runs along it.
+        const acrossTrack = (line: StrokedLine) =>
+            line.points.some(point => Math.abs(point.y) > 0.1);
+        const portal = black.find(acrossTrack)!;
+        const above = black.find(line => !acrossTrack(line))!;
+        expect(above.points[0]!.x).toBeCloseTo(50);
+        expect(above.points.at(-1)!.x).toBeCloseTo(100);
+        expect(portal.points[1]!.x).toBeCloseTo(50);
+        expect(Math.abs(portal.points[1]!.y)).toBeCloseTo(P);
+        const grey = lines.filter(line => line.color !== 0x000000);
+        expect(grey.length).toBeGreaterThan(0);
+        for (const line of grey) {
+            expect(line.color).toBe(0x808080);
+            for (const point of line.points) {
+                expect(point.x).toBeLessThanOrEqual(50 + 1e-6);
+            }
+        }
+    });
+
+    it('decides underground with the terrain', () => {
+        const { host, graph, renderer } = scene({ terrain: flatTerrain(5) });
+        renderer.renderStyle = 'centerline';
+
+        layTrack(graph, [A, B]);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+            expect(line.color).toBe(0x808080);
+        }
+    });
+
+    it('draws each segment in its line style', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'disused' } });
+
+        layTrack(graph, [A, B]);
+
+        const dotted = strokedLines(host.bandItem('__simplified__0'));
+        expect(dotted.length).toBeGreaterThan(10);
+        for (const line of dotted) {
+            expect(line.color).toBe(0x999999);
+        }
+
+        graph.setSegmentStyle(0, { lineStyle: { color: 0xff0000 } });
+
+        const red = strokedLines(host.bandItem('__simplified__0'));
+        expect(red).toHaveLength(1);
+        expect(red[0]!.color).toBe(0xff0000);
+    });
+
+    it('draws a wider line at its width in world units', async () => {
+        const { host, graph, camera, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { width: 3 } });
+
+        layTrack(graph, [A, B]);
+
+        const wide = strokedLines(host.bandItem('__simplified__0'));
+        expect(wide.length).toBeGreaterThan(0);
+        for (const line of wide) {
+            expect(line.width).toBe(3);
+            expect(line.pixelLine).toBe(false);
+        }
+
+        await zoomTo(camera, 2);
+
+        const zoomed = strokedLines(host.bandItem('__simplified__0'));
+        expect(zoomed.length).toBeGreaterThan(0);
+        for (const line of zoomed) {
+            expect(line.width).toBe(1.5);
+            expect(line.pixelLine).toBe(false);
+        }
+    });
+
+    it('re-strokes styled lines only at √2 zoom steps', async () => {
+        const { host, graph, camera, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
+        layTrack(graph, [A, B]);
+        graph.setNewSegmentStyle({ lineStyle: undefined });
+        layTrack(graph, [C, { x: 300, y: 0 }]);
+        const plain = host.bandItem('__simplified__1') as Graphics;
+        const cleared = spyOn(plain, 'clear');
+
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(10);
+
+        await zoomTo(camera, 1.3);
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(10);
+
+        await zoomTo(camera, 1.5);
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(15);
+
+        expect(cleared).not.toHaveBeenCalled();
+    });
+
+    it('gives a lone tunnel segment a portal at each end', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'tunnel' } });
+
+        layTrack(graph, [A, B]);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        const portals = lines
+            .filter(line => line.color === 0x000000)
+            .sort((a, b) => a.points[1]!.x - b.points[1]!.x);
+        expect(portals).toHaveLength(2);
+        expect(portals[0]!.points[1]!.x).toBeCloseTo(0);
+        expect(portals[1]!.points[1]!.x).toBeCloseTo(100);
+        const rest = lines.filter(line => line.color !== 0x000000);
+        expect(rest.length).toBeGreaterThan(0);
+        for (const line of rest) {
+            expect(line.color).toBe(0x808080);
+        }
+    });
+
+    it('draws the preview in the new-track line style and underground', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+        });
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
+
+        curveCreation.emit('onPreviewDrawDataChange', previewData(graph));
+
+        const lines = strokedLines(host.bandItem('__preview_rail__0'));
+        expect(lines.length).toBeGreaterThan(1);
+        for (const line of lines) {
+            expect(line.color).toBe(0x000000);
+        }
+    });
+
+    it('keeps the detailed style as it was', () => {
+        const { host, graph } = scene();
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
+
+        layTrack(graph, [A, B], ELEVATION.SUB_1);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]!.color).toBe(0x000000);
+        expect(host.bandKeys).toContain('__underground__0');
     });
 
     it('still reports the band of a draw-data piece', () => {
@@ -623,9 +784,12 @@ describe('TrackRenderSystem: line styles', () => {
 
         expect(host.bandKeys).toEqual(['__preview_rail__0']);
         expect(host.sublayerOf('__preview_rail__0')).toBe('rail');
-        expect(strokedLines(host.bandItem('__preview_rail__0'))).toHaveLength(
-            2
-        );
+        // The preview is under the terrain at 5, so it is lighter and dashed.
+        const lines = strokedLines(host.bandItem('__preview_rail__0'));
+        expect(lines.length).toBeGreaterThan(2);
+        for (const line of lines) {
+            expect(line.color).toBe(0x808080);
+        }
     });
 
     it('draws the preview curve arcs too', () => {
