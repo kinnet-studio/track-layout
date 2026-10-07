@@ -26,10 +26,17 @@ export const MARK_ANGLE = Math.PI / 4;
 /** Metres of clearance on each side of a crossing track's deck. */
 export const DECK_CLEARANCE = 1.5;
 
-/** Metres of clearance on each side of a gap cut in a track below a deck. */
+/**
+ * The default for the renderer's `bridgeGapClearance`: how far (metres) a gap
+ * cut in a track below a deck reaches past the upper track's parapets.
+ */
 export const GAP_CLEARANCE = 0.5;
 
-/** A crossing mark never reaches further than this (metres) from its track. */
+/**
+ * A crossing mark never reaches further than this (metres) from its track, so
+ * it is also how far the renderer walks along the joints to carry a mark onto
+ * the next segments, and the most `bridgeGapClearance` can be.
+ */
 export const MAX_MARK_HALF_LENGTH = 25;
 
 /** How far underground track is mixed toward white, from 0 to 1. */
