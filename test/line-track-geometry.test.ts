@@ -2,13 +2,16 @@ import { BCurve } from '@ue-too/curve';
 import { describe, expect, it } from 'bun:test';
 
 import {
+    type CrossingMark,
     type CrossingSide,
     type LineStroke,
     type LineTrackInput,
     buildLineTrack,
+    carrySpan,
     classifyCrossing,
     crossingMark,
     lightenColor,
+    markSpan,
     needsRunEndMark,
     patternIntervals,
     resolveLineStyle,
@@ -22,6 +25,9 @@ const STRAIGHT = new BCurve([
 ]);
 const P = 1.067 / 2 + 1.5;
 const W = 1.5 * Math.SQRT1_2; // a mark's reach along and across the track
+/** Marks on a 100 m segment, as the spans `buildLineTrack` takes. */
+const spans = (...marks: CrossingMark[]) =>
+    marks.map(mark => markSpan(mark, 100).span);
 const input = (o: Partial<LineTrackInput> = {}): LineTrackInput => ({
     samples: sampleLine(STRAIGHT),
     heights: { from: 0, to: 0 },
@@ -542,6 +548,17 @@ describe('crossingMark', () => {
         expect(gap!.kind).toBe('gap');
         expect(gap!.halfLength).toBeCloseTo(P + 0.5, 6);
     });
+
+    it('takes the gap clearance into crossingMark', () => {
+        const under = side(STRAIGHT, 0);
+        const over = side(V, 10);
+        const gapAt = (clearance?: number) =>
+            crossingMark(under, over, null, 'centerline', clearance)!
+                .halfLength;
+        expect(gapAt(0)).toBeCloseTo(P, 6);
+        expect(gapAt(3)).toBeCloseTo(P + 3, 6);
+        expect(gapAt()).toBeCloseTo(P + 0.5, 6);
+    });
 });
 
 describe('needsRunEndMark', () => {
@@ -577,14 +594,14 @@ describe('needsRunEndMark', () => {
 describe('buildLineTrack marks', () => {
     it('cuts a gap in every line', () => {
         const gap = { kind: 'gap', s: 50, halfLength: 2.5 } as const;
-        const centre = buildLineTrack(input({ marks: [gap] }));
+        const centre = buildLineTrack(input({ marks: spans(gap) }));
         expectSpans(xSpans(centre.strokes), [
             [0, 47.5],
             [52.5, 100],
         ]);
 
         const rails = buildLineTrack(
-            input({ renderStyle: 'rails', marks: [gap] })
+            input({ renderStyle: 'rails', marks: spans(gap) })
         );
         expect(rails.strokes).toHaveLength(4);
         for (const sign of [-1, 1]) {
@@ -607,20 +624,20 @@ describe('buildLineTrack marks', () => {
     it('clamps a gap to the segment, and merges gaps that overlap', () => {
         const ends = buildLineTrack(
             input({
-                marks: [
+                marks: spans(
                     { kind: 'gap', s: 1, halfLength: 3 },
-                    { kind: 'gap', s: 99, halfLength: 3 },
-                ],
+                    { kind: 'gap', s: 99, halfLength: 3 }
+                ),
             })
         );
         expectSpans(xSpans(ends.strokes), [[4, 96]]);
 
         const overlapping = buildLineTrack(
             input({
-                marks: [
+                marks: spans(
                     { kind: 'gap', s: 50, halfLength: 5 },
-                    { kind: 'gap', s: 53, halfLength: 5 },
-                ],
+                    { kind: 'gap', s: 53, halfLength: 5 }
+                ),
             })
         );
         expectSpans(xSpans(overlapping.strokes), [
@@ -633,7 +650,7 @@ describe('buildLineTrack marks', () => {
         const drawing = buildLineTrack(
             input({
                 lineStyle: { pattern: 'dashed' },
-                marks: [{ kind: 'gap', s: 50, halfLength: 2.5 }],
+                marks: spans({ kind: 'gap', s: 50, halfLength: 2.5 }),
             })
         );
         // The dash that starts at 50 is cut to start at 52.5; none restart.
@@ -646,7 +663,7 @@ describe('buildLineTrack marks', () => {
 
     it('draws a deck as parapets with wings', () => {
         const drawing = buildLineTrack(
-            input({ marks: [{ kind: 'deck', s: 50, halfLength: 3 }] })
+            input({ marks: spans({ kind: 'deck', s: 50, halfLength: 3 }) })
         );
         expect(drawing.strokes).toHaveLength(3);
         expect(drawing.strokes.every(s => s.color === BLACK)).toBe(true);
@@ -668,7 +685,7 @@ describe('buildLineTrack marks', () => {
         const drawing = buildLineTrack(
             input({
                 renderStyle: 'rails',
-                marks: [{ kind: 'deck', s: 50, halfLength: 3 }],
+                marks: spans({ kind: 'deck', s: 50, halfLength: 3 }),
             })
         );
         expect(drawing.strokes).toHaveLength(4);
@@ -677,7 +694,7 @@ describe('buildLineTrack marks', () => {
 
     it('clamps a deck at the segment end, with no wing there', () => {
         const drawing = buildLineTrack(
-            input({ marks: [{ kind: 'deck', s: 1, halfLength: 3 }] })
+            input({ marks: spans({ kind: 'deck', s: 1, halfLength: 3 }) })
         );
         const rails = parapets(drawing.strokes);
         expect(rails).toHaveLength(2);
@@ -688,7 +705,7 @@ describe('buildLineTrack marks', () => {
         }
 
         const far = buildLineTrack(
-            input({ marks: [{ kind: 'deck', s: 99, halfLength: 3 }] })
+            input({ marks: spans({ kind: 'deck', s: 99, halfLength: 3 }) })
         );
         for (const sign of [-1, 1]) {
             const rail = parapets(far.strokes).find(
@@ -749,7 +766,7 @@ describe('buildLineTrack marks', () => {
             input({
                 lineStyle: bridge,
                 runEnds: { start: true, end: true },
-                marks: [{ kind: 'gap', s: 50, halfLength: 2.5 }],
+                marks: spans({ kind: 'gap', s: 50, halfLength: 2.5 }),
             })
         );
         const pieces = parapets(cut.strokes);
@@ -771,7 +788,7 @@ describe('buildLineTrack marks', () => {
             input({
                 lineStyle: { preset: 'bridge' },
                 runEnds: { start: true, end: true },
-                marks: [{ kind: 'gap', s: 1, halfLength: 3 }],
+                marks: spans({ kind: 'gap', s: 1, halfLength: 3 }),
             })
         );
         // The gap, [0, 4], cuts the start of each parapet and its wing's root.
@@ -797,7 +814,7 @@ describe('buildLineTrack marks', () => {
             input({
                 lineStyle: { preset: 'bridge' },
                 runEnds: { start: true, end: true },
-                marks: [{ kind: 'gap', s: 99, halfLength: 3 }],
+                marks: spans({ kind: 'gap', s: 99, halfLength: 3 }),
             })
         );
         const farWings = parapets(far.strokes).filter(
@@ -822,7 +839,7 @@ describe('buildLineTrack marks', () => {
             input({
                 lineStyle: { preset: 'bridge' },
                 runEnds: { start: false, end: false },
-                marks: [{ kind: 'gap', s: 1, halfLength: 3 }],
+                marks: spans({ kind: 'gap', s: 1, halfLength: 3 }),
             })
         );
         expect(parapets(none.strokes).every(s => s.points.length > 2)).toBe(
@@ -835,7 +852,7 @@ describe('buildLineTrack marks', () => {
             input({
                 lineStyle: { preset: 'bridge' },
                 runEnds: { start: true, end: true },
-                marks: [{ kind: 'gap', s: 50, halfLength: 60 }],
+                marks: spans({ kind: 'gap', s: 50, halfLength: 60 }),
             })
         );
         expect(drawing.strokes).toHaveLength(4);
@@ -845,10 +862,10 @@ describe('buildLineTrack marks', () => {
     it('merges decks that overlap into one, with wings at its outer ends', () => {
         const drawing = buildLineTrack(
             input({
-                marks: [
+                marks: spans(
                     { kind: 'deck', s: 52, halfLength: 2.2 },
-                    { kind: 'deck', s: 48, halfLength: 2.2 },
-                ],
+                    { kind: 'deck', s: 48, halfLength: 2.2 }
+                ),
             })
         );
         const rails = parapets(drawing.strokes);
@@ -870,20 +887,20 @@ describe('buildLineTrack marks', () => {
     it('keeps decks that are apart separate, and merges touching ones', () => {
         const apart = buildLineTrack(
             input({
-                marks: [
+                marks: spans(
                     { kind: 'deck', s: 30, halfLength: 3 },
-                    { kind: 'deck', s: 60, halfLength: 3 },
-                ],
+                    { kind: 'deck', s: 60, halfLength: 3 }
+                ),
             })
         );
         expect(parapets(apart.strokes)).toHaveLength(4);
 
         const touching = buildLineTrack(
             input({
-                marks: [
+                marks: spans(
                     { kind: 'deck', s: 47, halfLength: 3 },
-                    { kind: 'deck', s: 53, halfLength: 3 },
-                ],
+                    { kind: 'deck', s: 53, halfLength: 3 }
+                ),
             })
         );
         const rails = parapets(touching.strokes);
@@ -899,10 +916,10 @@ describe('buildLineTrack marks', () => {
     it('merges decks only up to the segment end, with no wing there', () => {
         const drawing = buildLineTrack(
             input({
-                marks: [
+                marks: spans(
                     { kind: 'deck', s: 1, halfLength: 3 },
-                    { kind: 'deck', s: 5, halfLength: 3 },
-                ],
+                    { kind: 'deck', s: 5, halfLength: 3 }
+                ),
             })
         );
         const rails = parapets(drawing.strokes);
@@ -983,6 +1000,161 @@ describe('buildLineTrack marks', () => {
         );
         expectSpans(xSpans(planned.strokes), dashSpans(0, 100));
         expect(onCentre(planned.strokes)).toBe(true);
+    });
+});
+
+describe('markSpan', () => {
+    it('keeps a mark inside the segment whole, with wings at both ends', () => {
+        expect(markSpan({ kind: 'deck', s: 50, halfLength: 3 }, 100)).toEqual({
+            span: {
+                kind: 'deck',
+                from: 47,
+                to: 53,
+                wings: { start: true, end: true },
+            },
+            overflow: { start: 0, end: 0 },
+        });
+    });
+
+    it('clamps a mark past either end and reports the overflow, with no wing there', () => {
+        const atStart = markSpan({ kind: 'deck', s: 1, halfLength: 3 }, 100);
+        expect(atStart.span).toMatchObject({
+            from: 0,
+            to: 4,
+            wings: { start: false, end: true },
+        });
+        expect(atStart.overflow.start).toBeCloseTo(2, 9);
+        const atEnd = markSpan({ kind: 'gap', s: 99, halfLength: 3 }, 100);
+        expect(atEnd.span).toMatchObject({ from: 96, to: 100 });
+        expect(atEnd.overflow.end).toBeCloseTo(2, 9);
+    });
+
+    it('treats an overflow of float noise as none, so the deck keeps its wing there', () => {
+        const noisy = markSpan(
+            { kind: 'deck', s: 98, halfLength: 2 + 1e-12 },
+            100
+        );
+
+        expect(noisy.overflow.end).toBe(0);
+        expect(noisy.span.wings.end).toBe(true);
+        const atStart = markSpan(
+            { kind: 'deck', s: 2, halfLength: 2 + 1e-12 },
+            100
+        );
+        expect(atStart.overflow.start).toBe(0);
+        expect(atStart.span.wings.start).toBe(true);
+    });
+});
+
+describe('carrySpan', () => {
+    it('carries an overflow onto the start or end of a neighbour, with a wing at the far side', () => {
+        expect(carrySpan('deck', 2, 100, 'start')).toEqual({
+            span: {
+                kind: 'deck',
+                from: 0,
+                to: 2,
+                wings: { start: false, end: true },
+            },
+            remaining: 0,
+        });
+        expect(carrySpan('deck', 2, 100, 'end')).toEqual({
+            span: {
+                kind: 'deck',
+                from: 98,
+                to: 100,
+                wings: { start: true, end: false },
+            },
+            remaining: 0,
+        });
+    });
+
+    it('covers a neighbour shorter than the overflow and passes the rest on, with no far wing', () => {
+        expect(carrySpan('gap', 7, 5, 'start')).toEqual({
+            span: {
+                kind: 'gap',
+                from: 0,
+                to: 5,
+                wings: { start: false, end: false },
+            },
+            remaining: 2,
+        });
+    });
+
+    it('treats what is left over by float noise as nothing, so the deck ends here with a wing', () => {
+        const carried = carrySpan('deck', 5 + 1e-12, 5, 'start');
+
+        expect(carried.remaining).toBe(0);
+        expect(carried.span.wings).toEqual({ start: false, end: true });
+    });
+});
+
+describe('buildLineTrack with spans', () => {
+    it('cuts a gap span that starts at the segment start from 0', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    {
+                        kind: 'gap',
+                        from: 0,
+                        to: 2,
+                        wings: { start: false, end: false },
+                    },
+                ],
+            })
+        );
+        expectSpans(xSpans(drawing.strokes), [[2, 100]]);
+    });
+
+    it('draws no wing where a deck span says so', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    {
+                        kind: 'deck',
+                        from: 0,
+                        to: 4,
+                        wings: { start: false, end: true },
+                    },
+                ],
+            })
+        );
+        const parapets = drawing.strokes.filter(
+            s => Math.abs(Math.abs(s.points[1]!.y) - P) < 1e-6
+        );
+        expect(parapets).toHaveLength(2);
+        for (const p of parapets) {
+            expect(p.points[0]!.x).toBeCloseTo(0, 6);
+            expect(p.points.at(-1)!.x).toBeCloseTo(4 + W, 6);
+        }
+    });
+
+    it('merges an own and a carried deck span, keeping their outer wing flags', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    {
+                        kind: 'deck',
+                        from: 95,
+                        to: 100,
+                        wings: { start: true, end: false },
+                    },
+                    {
+                        kind: 'deck',
+                        from: 97,
+                        to: 100,
+                        wings: { start: false, end: false },
+                    },
+                ],
+            })
+        );
+        const parapets = drawing.strokes.filter(
+            s => Math.abs(Math.abs(s.points[1]!.y) - P) < 1e-6
+        );
+        expect(parapets).toHaveLength(2);
+        for (const p of parapets) {
+            expect(p.points[0]!.x).toBeCloseTo(95 - W, 6);
+            expect(p.points.at(-1)!.x).toBeCloseTo(100, 6);
+        }
     });
 });
 

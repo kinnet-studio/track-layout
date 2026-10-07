@@ -1220,3 +1220,789 @@ describe('TrackRenderSystem: crossings and runs', () => {
         }
     });
 });
+
+describe('TrackRenderSystem: marks across joints', () => {
+    const GAP = P + 0.5; // half-gap at 90°
+    const DECK = 1.067 / 2 + 1.5; // half-deck at 90°
+    const linesOf = (host: RecordingLayerHost, n: number) =>
+        strokedLines(host.bandItem(`__simplified__${n}`));
+    const xSpans = (lines: StrokedLine[]) =>
+        lines
+            .map(line => [
+                Math.min(...line.points.map(point => point.x)),
+                Math.max(...line.points.map(point => point.x)),
+            ])
+            .sort((a, b) => a[0]! - b[0]!);
+    /** The parapets of a deck: the lines that run P either side of the centre line. */
+    const parapetsOf = (lines: StrokedLine[]) =>
+        lines.filter(line => Math.abs(Math.abs(line.points[1]!.y) - P) < 1e-6);
+    const expectSpans = (
+        spans: number[][],
+        expected: [number, number][]
+    ): void => {
+        expect(spans).toHaveLength(expected.length);
+        expected.forEach(([from, to], i) => {
+            expect(spans[i]![0]).toBeCloseTo(from, 6);
+            expect(spans[i]![1]).toBeCloseTo(to, 6);
+        });
+    };
+
+    /** Track A–B–C at ground level, and an upper track across it at x = 99, 1 m short of the joint. */
+    function layGapScene(graph: TrackGraph) {
+        layTrack(graph, [A, B, C]);
+        return layLine(
+            graph,
+            { x: 99, y: -50 },
+            { x: 99, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+    }
+    const carriedGap: [number, number][][] = [
+        [[0, 99 - GAP]],
+        [[99 + GAP, 200]],
+    ];
+
+    it('carries a gap across the joint onto the next segment', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        layGapScene(graph);
+
+        expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
+        expectSpans(xSpans(linesOf(host, 1)), carriedGap[1]!);
+    });
+
+    it('carries a deck across the joint, with wings only at its true ends', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
+
+        const first = parapetsOf(linesOf(host, 0));
+        expect(first).toHaveLength(2);
+        for (const parapet of first) {
+            expect(parapet.points[0]!.x).toBeCloseTo(99 - DECK - W, 6);
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(100, 6);
+        }
+        const second = parapetsOf(linesOf(host, 1));
+        expect(second).toHaveLength(2);
+        for (const parapet of second) {
+            expect(parapet.points[0]!.x).toBeCloseTo(100, 6);
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(99 + DECK + W, 6);
+        }
+    });
+
+    it('carries a gap onto every branch at a junction', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const tangent = { x: 1, y: 0 };
+        const [a, b, c, d] = [A, B, C, { x: 200, y: 60 }].map(point =>
+            graph.createNewEmptyJoint(point, tangent)
+        );
+        graph.connectJoints(a!, b!, [{ x: 50, y: 0 }]);
+        graph.connectJoints(b!, c!, [{ x: 150, y: 0 }]);
+        graph.connectJoints(b!, d!, [{ x: 150, y: 0 }]);
+        const bc = graph.getJoint(b!)!.connections.get(c!)!;
+        const bd = graph.getJoint(b!)!.connections.get(d!)!;
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+
+        const minX = (n: number) => xSpans(linesOf(host, n))[0]![0]!;
+        expect(minX(bc)).toBeCloseTo(99 + GAP, 6);
+        expect(Math.abs(minX(bd) - (99 + GAP))).toBeLessThan(0.1);
+    });
+
+    it('chains a gap across a short segment', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, { x: 105, y: 0 }, C]);
+        const angle = (20 * Math.PI) / 180;
+        const reach = 50;
+
+        layLine(
+            graph,
+            { x: 99 - reach * Math.cos(angle), y: -reach * Math.sin(angle) },
+            { x: 99 + reach * Math.cos(angle), y: reach * Math.sin(angle) },
+            ELEVATION.ABOVE_1
+        );
+
+        const half = (P + 0.5) / Math.sin(angle);
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 99 - half]]);
+        expect(linesOf(host, 1)).toHaveLength(0);
+        expectSpans(xSpans(linesOf(host, 2)), [[99 + half, 200]]);
+    });
+
+    it('carries no deck onto a bridge segment, whose parapets run its length', () => {
+        const layBridgeRun = (graph: TrackGraph) => {
+            layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+            graph.setSegmentStyle(1, { lineStyle: { preset: 'bridge' } });
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layBridgeRun(graph);
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        layBridgeRun(alone.graph);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
+
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+        // The deck on the first segment still ends at the joint, with no wing.
+        const first = parapetsOf(linesOf(host, 0));
+        expect(first).toHaveLength(2);
+        for (const parapet of first) {
+            expect(parapet.points[0]!.x).toBeCloseTo(99 - DECK - W, 6);
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(100, 6);
+            expect(Math.abs(parapet.points.at(-1)!.y)).toBeCloseTo(P, 6);
+        }
+    });
+
+    it('carries no gap onto a tunnel segment', () => {
+        const layTunnel = (graph: TrackGraph) => {
+            layTrack(graph, [A, B, C]);
+            graph.setSegmentStyle(1, { lineStyle: { preset: 'tunnel' } });
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTunnel(graph);
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        layTunnel(alone.graph);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+
+        expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+    });
+
+    it('carries no gap onto track that is below the terrain where the gap enters it', () => {
+        // The ground rises past x = 99.5, so the segment from B is buried.
+        const terrain: TerrainSampler = {
+            getHeight: x => (x > 99.5 ? 10 : -10),
+        };
+        const { host, graph, renderer } = scene({ terrain });
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, C]);
+        const alone = scene({ terrain });
+        alone.renderer.renderStyle = 'centerline';
+        layTrack(alone.graph, [A, B, C]);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+
+        // The first segment has its own gap (and a portal where it goes under).
+        const centreLine = linesOf(host, 0).filter(line =>
+            line.points.every(point => Math.abs(point.y) < 1e-9)
+        );
+        expectSpans(xSpans(centreLine), carriedGap[0]!);
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+    });
+
+    it('carries no deck onto a tunnel segment', () => {
+        const layTunnel = (graph: TrackGraph) => {
+            layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+            graph.setSegmentStyle(1, { lineStyle: { preset: 'tunnel' } });
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTunnel(graph);
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        layTunnel(alone.graph);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
+
+        expect(parapetsOf(linesOf(host, 0))).toHaveLength(2);
+        expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
+    });
+
+    it('ends a deck at an open end with a wing', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
+
+        const parapets = parapetsOf(linesOf(host, 0));
+        expect(parapets).toHaveLength(2);
+        for (const parapet of parapets) {
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(100 + W, 6);
+        }
+    });
+
+    it('ends a deck that chains over a short segment with a wing at the open end', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, { x: 105, y: 0 }], ELEVATION.ABOVE_1);
+        const angle = (20 * Math.PI) / 180;
+        const reach = 50;
+
+        layLine(
+            graph,
+            { x: 99 - reach * Math.cos(angle), y: -reach * Math.sin(angle) },
+            { x: 99 + reach * Math.cos(angle), y: reach * Math.sin(angle) }
+        );
+
+        // The deck is longer than the 5 m segment past the joint, so it covers it whole.
+        const second = parapetsOf(linesOf(host, 1));
+        expect(second).toHaveLength(2);
+        for (const parapet of second) {
+            expect(parapet.points[0]!.x).toBeCloseTo(100, 6);
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(105 + W, 6);
+        }
+    });
+
+    it('restores both sides of the joint when the upper track is removed', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const upper = layGapScene(graph);
+
+        graph.removeTrackSegment(upper);
+
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 100]]);
+        expectSpans(xSpans(linesOf(host, 1)), [[100, 200]]);
+    });
+
+    it('restores the next segment when the crossed lower segment is removed', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layGapScene(graph);
+        expectSpans(xSpans(linesOf(host, 1)), carriedGap[1]!);
+
+        graph.removeTrackSegment(0);
+
+        expectSpans(xSpans(linesOf(host, 1)), [[100, 200]]);
+    });
+
+    it('restores both sides of the joint when the upper track becomes a tunnel', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const upper = layGapScene(graph);
+
+        graph.setSegmentStyle(upper, { lineStyle: { preset: 'tunnel' } });
+
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 100]]);
+        expectSpans(xSpans(linesOf(host, 1)), [[100, 200]]);
+    });
+
+    it('draws carried gaps after loading a saved layout', async () => {
+        const source = new TrackGraph();
+        layGapScene(source);
+        const saved = source.serialize();
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        await graph.loadFromSerializedData(saved, {
+            yieldToFrame: async () => {},
+        });
+
+        expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
+        expectSpans(xSpans(linesOf(host, 1)), carriedGap[1]!);
+    });
+
+    it('carries a gap onto track laid after the crossing', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { joints } = layTrack(graph, [A, B]);
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+
+        const end = graph.createNewEmptyJoint(C, { x: 1, y: 0 });
+        expect(graph.connectJoints(joints[1]!, end, [{ x: 150, y: 0 }])).toBe(
+            true
+        );
+        const next = graph.getJoint(joints[1]!)!.connections.get(end)!;
+
+        expectSpans(xSpans(linesOf(host, next)), [[99 + GAP, 200]]);
+    });
+
+    it('carries a gap onto the neighbour that was laid before the crossed segment', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const tangent = { x: 1, y: 0 };
+        const [a, b, c] = [A, B, C].map(point =>
+            graph.createNewEmptyJoint(point, tangent)
+        );
+        expect(graph.connectJoints(b!, c!, [{ x: 150, y: 0 }])).toBe(true);
+        const next = graph.getJoint(b!)!.connections.get(c!)!;
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+        expectSpans(xSpans(linesOf(host, next)), [[100, 200]]);
+
+        expect(graph.connectJoints(a!, b!, [{ x: 50, y: 0 }])).toBe(true);
+
+        expectSpans(xSpans(linesOf(host, next)), [[99 + GAP, 200]]);
+    });
+
+    it('keeps one gap when the lower segment is split near the crossing', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { segments } = layTrack(graph, [A, C]);
+        const upper = layLine(
+            graph,
+            { x: 99, y: -50 },
+            { x: 99, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+
+        graph.insertJointIntoTrackSegmentUsingTrackNumber(segments[0]!, 0.5);
+
+        const lower = [...graph.trackCurveManager.livingEntities]
+            .filter(n => n !== upper)
+            .map(n => xSpans(linesOf(host, n)))
+            .sort((a, b) => a[0]![0]! - b[0]![0]!);
+        expect(lower).toHaveLength(2);
+        expectSpans(lower[0]!, [[0, 99 - GAP]]);
+        expectSpans(lower[1]!, [[99 + GAP, 200]]);
+    });
+
+    it('stops walking at a loop of track shorter than the reach', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const crossings = spyOn(graph.trackCurveManager, 'getCrossings');
+        const tangent = { x: 1, y: 0 };
+        // A triangle with 7 m sides: its 21 m loop is inside the 25 m reach.
+        const [left, right, bottom] = [
+            { x: 95, y: 0 },
+            { x: 102, y: 0 },
+            { x: 98.5, y: -6 },
+        ].map(point => graph.createNewEmptyJoint(point, tangent));
+        expect(graph.connectJoints(left!, right!, [{ x: 98.5, y: 0 }])).toBe(
+            true
+        );
+        expect(
+            graph.connectJoints(right!, bottom!, [{ x: 100.25, y: -3 }])
+        ).toBe(true);
+        expect(graph.connectJoints(bottom!, left!, [{ x: 96.75, y: -3 }])).toBe(
+            true
+        );
+        const top = graph.getJoint(left!)!.connections.get(right!)!;
+
+        layLine(graph, { x: 96, y: 5 }, { x: 96, y: -0.5 }, ELEVATION.ABOVE_1);
+
+        expectSpans(xSpans(linesOf(host, top)), [[96 + GAP, 102]]);
+        // Walking from the top side's start, the other two sides are each
+        // visited once, by their shortest way, and the walk ends there.
+        const visits: { number: number; distance: number }[] = [];
+        (renderer as any)._walkJoints(
+            top,
+            { joint: left!, position: { x: 95, y: 0 } },
+            ({ number, distance }: (typeof visits)[number]) =>
+                visits.push({ number, distance })
+        );
+        const leftSide = graph.getJoint(bottom!)!.connections.get(left!)!;
+        const rightSide = graph.getJoint(right!)!.connections.get(bottom!)!;
+        expect(visits.map(visit => visit.number)).toEqual([
+            leftSide,
+            rightSide,
+        ]);
+        expect(visits[0]!.distance).toBe(0);
+        expect(visits[1]!.distance).toBeCloseTo(Math.hypot(3.5, 6), 3);
+        // Four segments, and four additions that each look a segment up at
+        // most once: not a lap round the loop for every one.
+        expect(crossings.mock.calls.length).toBeLessThanOrEqual(4 * 4);
+    });
+
+    it('carries a gap the short way round a loop, not the way with fewer segments', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const tangent = { x: 1, y: 0 };
+        const joint = (x: number, y: number) =>
+            graph.createNewEmptyJoint({ x, y }, tangent);
+        const [far, j0, j1, k, end] = [
+            joint(-20, 0),
+            joint(0, 0),
+            joint(4, 0),
+            joint(2, 0.3),
+            joint(30, 0),
+        ];
+        const segmentBetween = (from: number, to: number) =>
+            graph.getJoint(from)!.connections.get(to)!;
+        // The track `n` ends at j0. From there j1 is 4.04 m away through k
+        // (two segments) and 5.2 m away by the curved segment, which is one.
+        expect(graph.connectJoints(far!, j0!, [{ x: -10, y: 0 }])).toBe(true);
+        expect(graph.connectJoints(j0!, j1!, [{ x: 2, y: -3 }])).toBe(true);
+        expect(graph.connectJoints(j0!, k!, [{ x: 1, y: 0.15 }])).toBe(true);
+        expect(graph.connectJoints(k!, j1!, [{ x: 3, y: 0.15 }])).toBe(true);
+        expect(graph.connectJoints(j1!, end!, [{ x: 17, y: 0 }])).toBe(true);
+        const n = segmentBetween(far!, j0!);
+        const shortWay = 2 * Math.hypot(2, 0.3);
+
+        // The track at 10° over m, 10 m along it, puts a gap on m that reaches
+        // 4.6 m past j1: more than the short way, less than the long one.
+        const angle = (10 * Math.PI) / 180;
+        layLine(
+            graph,
+            { x: 14 + 50 * Math.cos(angle), y: -50 * Math.sin(angle) },
+            { x: 14 - 50 * Math.cos(angle), y: 50 * Math.sin(angle) },
+            ELEVATION.ABOVE_1
+        );
+
+        const overflow = (P + 0.5) / Math.sin(angle) - 10;
+        expect(overflow).toBeGreaterThan(shortWay);
+        expect(overflow).toBeLessThan(5.1);
+        expectSpans(xSpans(linesOf(host, n)), [[-20, -(overflow - shortWay)]]);
+    });
+
+    it('finds the crossings of a segment at most once per event, and keeps them for the next', () => {
+        const { graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { joints, segments } = layTrack(
+            graph,
+            [0, 10, 20, 30, 40, 50, 60].map(x => ({ x, y: 0 }))
+        );
+        const upper = layLine(
+            graph,
+            { x: 25, y: -20 },
+            { x: 25, y: 20 },
+            ELEVATION.ABOVE_1
+        );
+        const crossings = spyOn(graph.trackCurveManager, 'getCrossings');
+        /** The segments `event` looks up, in order; none of them twice. */
+        const askedBy = (event: () => void): number[] => {
+            crossings.mockClear();
+            event();
+            const asked = crossings.mock.calls.map(([segment]) => segment);
+            expect(new Set(asked).size).toBe(asked.length);
+            return asked.sort((a, b) => a - b);
+        };
+        const living = () =>
+            [...graph.trackCurveManager.livingEntities].sort((a, b) => a - b);
+
+        let next = -1;
+        const added = askedBy(() => {
+            const end = graph.createNewEmptyJoint(
+                { x: 70, y: 0 },
+                { x: 1, y: 0 }
+            );
+            graph.connectJoints(joints[6]!, end, [{ x: 65, y: 0 }]);
+            next = graph.getJoint(joints[6]!)!.connections.get(end)!;
+        });
+        expect(added).toContain(next);
+        expect(added).not.toContain(upper);
+        expect(added).not.toContain(segments[2]!);
+
+        let far = -1;
+        expect(
+            askedBy(
+                () => (far = layLine(graph, { x: 500, y: 0 }, { x: 600, y: 0 }))
+            )
+        ).toEqual([far]);
+        expect(
+            askedBy(() =>
+                graph.setSegmentStyle(segments[3]!, {
+                    lineStyle: { color: 0x2266cc },
+                })
+            )
+        ).toEqual([]);
+        expect(
+            askedBy(() =>
+                graph.setSegmentStyle(segments[3]!, {
+                    lineStyle: { preset: 'bridge' },
+                })
+            )
+        ).toEqual([segments[3]!]);
+        const removed = askedBy(() => graph.removeTrackSegment(segments[4]!));
+        expect(removed).not.toContain(upper);
+        expect(removed).not.toContain(segments[2]!);
+
+        expect(askedBy(() => (renderer.renderStyle = 'rails'))).toEqual(
+            living()
+        );
+        expect(askedBy(() => (renderer.bridgeGapClearance = 3))).toEqual(
+            living()
+        );
+    });
+
+    it('finds a crossing that only the crossed segment reports when it is drawn again', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const manager = graph.trackCurveManager;
+        const h = layLine(graph, A, B);
+        // Crossings are found approximately, so one can be missed from one
+        // side: here no segment but h reports any. Adding or removing v then
+        // doesn't redraw h, so a style change draws it again.
+        const real = manager.getCrossings.bind(manager);
+        const crossings = spyOn(manager, 'getCrossings').mockImplementation(
+            n => (n === h ? real(n) : [])
+        );
+        const redrawH = (color: number) =>
+            graph.setSegmentStyle(h, { lineStyle: { color } });
+        try {
+            const v = layLine(
+                graph,
+                { x: 50, y: -50 },
+                { x: 50, y: 50 },
+                ELEVATION.ABOVE_1
+            );
+
+            redrawH(0x2266cc);
+            expectSpans(xSpans(linesOf(host, h)), [
+                [0, 50 - GAP],
+                [50 + GAP, 100],
+            ]);
+
+            // Drawn again, v records only its own crossings, which miss h.
+            graph.setSegmentStyle(v, { lineStyle: { color: 0x2266cc } });
+            graph.removeTrackSegment(v);
+            redrawH(0xcc2266);
+            expectSpans(xSpans(linesOf(host, h)), [[0, 100]]);
+        } finally {
+            crossings.mockRestore();
+        }
+    });
+
+    it('finds the marks again when a crossing track stops or starts being a tunnel', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = layCrossing(graph);
+
+        graph.setSegmentStyle(v, { lineStyle: { preset: 'tunnel' } });
+        expectSpans(xSpans(linesOf(host, h)), [[0, 100]]);
+
+        graph.setSegmentStyle(v, { lineStyle: undefined });
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - GAP],
+            [50 + GAP, 100],
+        ]);
+    });
+
+    it('redraws only the restyled segment when its preset stays the same', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const upper = layGapScene(graph);
+        const disused = { preset: 'disused', pattern: 'solid' } as const;
+        graph.setSegmentStyle(1, { lineStyle: disused });
+        const draw = spyOn(renderer as any, '_drawLineSegment');
+        const drawnBy = (event: () => void): number[] => {
+            draw.mockClear();
+            event();
+            return draw.mock.calls.map(([segment]) => segment as number);
+        };
+
+        expect(
+            drawnBy(() =>
+                graph.setSegmentStyle(1, {
+                    lineStyle: { ...disused, color: 0xff0000 },
+                })
+            )
+        ).toEqual([1]);
+        expect(
+            drawnBy(() =>
+                graph.setSegmentStyle(upper, {
+                    lineStyle: { pattern: 'dashed', width: 3 },
+                })
+            )
+        ).toEqual([upper]);
+        expect(
+            drawnBy(() => graph.setSegmentStyle(0, { trackStyle: 'slab' }))
+        ).toEqual([0]);
+
+        // The redrawn segments keep what their neighbours put on them.
+        const red = linesOf(host, 1);
+        expect(red.length).toBeGreaterThan(0);
+        for (const line of red) expect(line.color).toBe(0xff0000);
+        expect(xSpans(red)[0]![0]).toBeCloseTo(99 + GAP, 6);
+        expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
+    });
+
+    it('finds its own marks again when a track becomes a bridge and stops being one', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { v } = layCrossing(graph);
+        const decked = linesOf(host, v);
+        const bridge = { lineStyle: { preset: 'bridge' as const } };
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        const same = layLine(
+            alone.graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        alone.graph.setSegmentStyle(same, bridge);
+
+        graph.setSegmentStyle(v, bridge);
+        expect(linesOf(host, v)).toEqual(linesOf(alone.host, same));
+
+        graph.setSegmentStyle(v, { lineStyle: undefined });
+        expect(linesOf(host, v)).toEqual(decked);
+    });
+
+    it('finds the marks again for the new style after a render-style switch', () => {
+        const angle = Math.PI / 4;
+        const layAt45 = (graph: TrackGraph) => {
+            const h = layLine(graph, A, B);
+            layLine(
+                graph,
+                { x: 50 - 50 * Math.cos(angle), y: -50 * Math.sin(angle) },
+                { x: 50 + 50 * Math.cos(angle), y: 50 * Math.sin(angle) },
+                ELEVATION.ABOVE_1
+            );
+            return h;
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h = layAt45(graph);
+        const inRails = scene();
+        inRails.renderer.renderStyle = 'rails';
+        const same = layAt45(inRails.graph);
+
+        renderer.renderStyle = 'rails';
+
+        expect(linesOf(host, h)).toEqual(linesOf(inRails.host, same));
+    });
+
+    it('cuts both segments once at a crossing on the joint', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, C]);
+
+        layLine(
+            graph,
+            { x: 100, y: -50 },
+            { x: 100, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 100 - GAP]]);
+        expectSpans(xSpans(linesOf(host, 1)), [[100 + GAP, 200]]);
+    });
+
+    /** h along y = 0, then v across it at x = 50, one level up. */
+    function layCrossing(graph: TrackGraph) {
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        const v = layLine(
+            graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        return { h, v };
+    }
+
+    it('takes the gap clearance from its options', () => {
+        const { host, graph, renderer } = scene({ bridgeGapClearance: 3 });
+        renderer.renderStyle = 'centerline';
+
+        const { h } = layCrossing(graph);
+
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - (P + 3)],
+            [50 + (P + 3), 100],
+        ]);
+    });
+
+    it('redraws gaps in place when the clearance changes', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h } = layCrossing(graph);
+        const before = host.bandItem(`__simplified__${h}`);
+        expect(before).toBeDefined();
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - GAP],
+            [50 + GAP, 100],
+        ]);
+
+        renderer.bridgeGapClearance = 0;
+
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - P],
+            [50 + P, 100],
+        ]);
+        expect(host.bandItem(`__simplified__${h}`)).toBe(before);
+    });
+
+    it('redraws carried gaps when the clearance changes', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layGapScene(graph);
+        expectSpans(xSpans(linesOf(host, 1)), carriedGap[1]!);
+
+        renderer.bridgeGapClearance = 3;
+
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 99 - (P + 3)]]);
+        expectSpans(xSpans(linesOf(host, 1)), [[99 + P + 3, 200]]);
+    });
+
+    it('redraws nothing when the clearance is unchanged', () => {
+        const { graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layCrossing(graph);
+        const redraw = spyOn(renderer as any, '_redrawLineSegment');
+
+        renderer.bridgeGapClearance = 0.5;
+        expect(redraw).not.toHaveBeenCalled();
+
+        renderer.bridgeGapClearance = 3;
+        const redrawn = redraw.mock.calls.length;
+        expect(redrawn).toBe(2);
+        renderer.bridgeGapClearance = 3;
+        renderer.bridgeGapClearance = Number.NaN;
+        expect(redraw.mock.calls).toHaveLength(redrawn);
+    });
+
+    it('keeps the clearance across render-style switches', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h } = layCrossing(graph);
+
+        renderer.bridgeGapClearance = 2;
+        renderer.renderStyle = 'rails';
+        renderer.renderStyle = 'centerline';
+
+        expect(renderer.bridgeGapClearance).toBe(2);
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - (P + 2)],
+            [50 + (P + 2), 100],
+        ]);
+    });
+
+    it('uses a clearance set in detailed once a line style is chosen', () => {
+        const { host, graph, renderer } = scene();
+        const { h } = layCrossing(graph);
+
+        renderer.bridgeGapClearance = 2;
+        renderer.renderStyle = 'centerline';
+
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - (P + 2)],
+            [50 + (P + 2), 100],
+        ]);
+    });
+
+    it('clamps the clearance and ignores a non-number', () => {
+        const { renderer } = scene();
+        expect(renderer.bridgeGapClearance).toBe(0.5);
+
+        renderer.bridgeGapClearance = -1;
+        expect(renderer.bridgeGapClearance).toBe(0);
+        renderer.bridgeGapClearance = Number.POSITIVE_INFINITY;
+        expect(renderer.bridgeGapClearance).toBe(0);
+        renderer.bridgeGapClearance = 99;
+        expect(renderer.bridgeGapClearance).toBe(25);
+        renderer.bridgeGapClearance = Number.NaN;
+        expect(renderer.bridgeGapClearance).toBe(25);
+
+        expect(
+            scene({ bridgeGapClearance: 99 }).renderer.bridgeGapClearance
+        ).toBe(25);
+        expect(
+            scene({ bridgeGapClearance: -1 }).renderer.bridgeGapClearance
+        ).toBe(0);
+        expect(
+            scene({ bridgeGapClearance: Number.NaN }).renderer
+                .bridgeGapClearance
+        ).toBe(0.5);
+    });
+
+    it('changes nothing in detailed', () => {
+        const { host, graph, renderer } = scene();
+        layCrossing(graph);
+        const keys = host.bandKeys;
+        expect(keys.length).toBeGreaterThan(0);
+
+        renderer.bridgeGapClearance = 3;
+
+        expect(renderer.bridgeGapClearance).toBe(3);
+        expect(host.bandKeys).toEqual(keys);
+    });
+});

@@ -77,6 +77,8 @@ describe('pixi entry point', () => {
             'buildLineTrack',
             'resolveLineStyle',
             'classifyCrossing',
+            'markSpan',
+            'carrySpan',
         ]) {
             expect(pixi).not.toHaveProperty(name);
         }

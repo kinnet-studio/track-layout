@@ -26,10 +26,17 @@ export const MARK_ANGLE = Math.PI / 4;
 /** Metres of clearance on each side of a crossing track's deck. */
 export const DECK_CLEARANCE = 1.5;
 
-/** Metres of clearance on each side of a gap cut in a track below a deck. */
+/**
+ * The default for the renderer's `bridgeGapClearance`: how far (metres) a gap
+ * cut in a track below a deck reaches past the upper track's parapets.
+ */
 export const GAP_CLEARANCE = 0.5;
 
-/** A crossing mark never reaches further than this (metres) from its track. */
+/**
+ * A crossing mark never reaches further than this (metres) from its track, so
+ * it is also how far the renderer walks along the joints to carry a mark onto
+ * the next segments, and the most `bridgeGapClearance` can be.
+ */
 export const MAX_MARK_HALF_LENGTH = 25;
 
 /** How far underground track is mixed toward white, from 0 to 1. */
@@ -276,13 +283,15 @@ export type CrossingMark = {
  * the whole segment. A mark is `cot θ` times the offset of its outermost line
  * longer than at a right angle (a deck's parapets, a gap's track lines or
  * parapets), so it still covers a skewed crossing, and it is capped at
- * {@link MAX_MARK_HALF_LENGTH} where the tracks are close to parallel.
+ * {@link MAX_MARK_HALF_LENGTH} where the tracks are close to parallel. A gap
+ * reaches `gapClearance` metres past the upper track's parapets.
  */
 export function crossingMark(
     self: CrossingSide,
     other: CrossingSide,
     terrain: TerrainSampler | null,
-    renderStyle: 'centerline' | 'rails'
+    renderStyle: 'centerline' | 'rails',
+    gapClearance: number = GAP_CLEARANCE
 ): CrossingMark | null {
     const kind = classifyCrossing(self, other, terrain);
     if (kind === 'level' || kind === 'buried') return null;
@@ -308,7 +317,7 @@ export function crossingMark(
                   ? self.gauge / 2
                   : 0;
             halfLength =
-                (parapetOffset(other.gauge) + GAP_CLEARANCE) / sin +
+                (parapetOffset(other.gauge) + gapClearance) / sin +
                 outermost * cot;
         }
     }
@@ -316,6 +325,84 @@ export function crossingMark(
         kind: kind === 'over' ? 'deck' : 'gap',
         s: self.curve.lengthAtT(self.t),
         halfLength: Math.min(halfLength, MAX_MARK_HALF_LENGTH),
+    };
+}
+
+/**
+ * A deck or gap over [`from`, `to`] of a segment's arc length, with a wing flag
+ * for each end of a deck.
+ */
+export type MarkSpan = {
+    kind: 'deck' | 'gap';
+    from: number;
+    to: number;
+    /** A deck's wing at `from` / `to`; ignored for gaps. */
+    wings: { start: boolean; end: boolean };
+};
+
+/** `amount` as a length that carries on, or 0 when it is only float noise. */
+const aboveNoise = (amount: number): number =>
+    amount > EMPTY_INTERVAL ? amount : 0;
+
+/**
+ * A mark's span on its own segment, clamped to [0, `length`], and how far the
+ * mark overflows each end. A deck has a wing at an end that lies inside the
+ * segment; at an end that overflows the flag is false, and the caller sets it
+ * once it knows whether a neighbour continues the deck. An overflow of float
+ * noise counts as none, so a deck that ends at a joint keeps its wing there.
+ */
+export function markSpan(
+    mark: CrossingMark,
+    length: number
+): { span: MarkSpan; overflow: { start: number; end: number } } {
+    const overflow = {
+        start: aboveNoise(mark.halfLength - mark.s),
+        end: aboveNoise(mark.s + mark.halfLength - length),
+    };
+    return {
+        span: {
+            kind: mark.kind,
+            from: Math.max(0, mark.s - mark.halfLength),
+            to: Math.min(length, mark.s + mark.halfLength),
+            wings: { start: overflow.start === 0, end: overflow.end === 0 },
+        },
+        overflow,
+    };
+}
+
+/**
+ * The part of an `overflow` that lands on a neighbour of `length` entered at
+ * its `'start'` or `'end'`, and what is left over to pass on. The wing at the
+ * entry side is false, since the deck continues across the joint; the one at
+ * the far side is true when nothing is left over (float noise is nothing),
+ * since the deck ends inside this segment. When something is left, that flag
+ * starts false, and the caller resolves it as it does for {@link markSpan}.
+ */
+export function carrySpan(
+    kind: MarkSpan['kind'],
+    overflow: number,
+    length: number,
+    enteringAt: 'start' | 'end'
+): { span: MarkSpan; remaining: number } {
+    const covered = Math.min(overflow, length);
+    const remaining = aboveNoise(overflow - length);
+    const farWing = remaining === 0;
+    return {
+        span:
+            enteringAt === 'start'
+                ? {
+                      kind,
+                      from: 0,
+                      to: covered,
+                      wings: { start: false, end: farWing },
+                  }
+                : {
+                      kind,
+                      from: length - covered,
+                      to: length,
+                      wings: { start: farWing, end: false },
+                  },
+        remaining,
     };
 }
 
@@ -357,8 +444,8 @@ export type LineTrackInput = {
     terrain: TerrainSampler | null;
     /** Metres per screen pixel: 1 / zoom level. */
     metresPerPixel: number;
-    /** Decks and gaps from the tracks that cross this one. */
-    marks?: CrossingMark[];
+    /** Decks and gaps from the tracks that cross this one, or reach it. */
+    marks?: MarkSpan[];
     /**
      * Whether each end of the segment is an end of its run of `tunnel` or
      * `bridge` segments, and so gets a portal or wings. Neither when omitted.
@@ -520,42 +607,43 @@ function portalStroke(
 }
 
 /**
- * The marks of one kind as arc-length spans [from, to], sorted, with spans that
- * overlap or touch merged into one. The ends are the marks' own: they may lie
- * outside the segment, and the caller clamps them.
+ * The spans of one kind, sorted, with spans that overlap or touch merged into
+ * one. A merged span takes its start wing from the span with the smallest
+ * `from` and its end wing from the one with the largest `to`, and where
+ * several tie, a wing if any of them has one. The ends are the spans' own: the
+ * caller clamps them to the segment.
  */
-function mergedSpans(
-    marks: CrossingMark[],
-    kind: CrossingMark['kind']
-): [number, number][] {
-    const spans = marks
-        .filter(mark => mark.kind === kind)
-        .map((mark): [number, number] => [
-            mark.s - mark.halfLength,
-            mark.s + mark.halfLength,
-        ])
-        .sort((a, b) => a[0] - b[0]);
-    const merged: [number, number][] = [];
-    for (const span of spans) {
+function mergedSpans(spans: MarkSpan[], kind: MarkSpan['kind']): MarkSpan[] {
+    const sorted = spans
+        .filter(span => span.kind === kind)
+        .map(span => ({ ...span, wings: { ...span.wings } }))
+        .sort((a, b) => a.from - b.from);
+    const merged: MarkSpan[] = [];
+    for (const span of sorted) {
         const last = merged[merged.length - 1];
-        if (last !== undefined && span[0] <= last[1]) {
-            last[1] = Math.max(last[1], span[1]);
-        } else {
-            merged.push([span[0], span[1]]);
+        if (last === undefined || span.from > last.to) {
+            merged.push(span);
+            continue;
+        }
+        if (span.from === last.from) {
+            last.wings.start = last.wings.start || span.wings.start;
+        }
+        if (span.to > last.to) {
+            last.to = span.to;
+            last.wings.end = span.wings.end;
+        } else if (span.to === last.to) {
+            last.wings.end = last.wings.end || span.wings.end;
         }
     }
     return merged;
 }
 
-/** The gap marks as merged arc-length intervals clamped to the segment. */
-function gapIntervals(
-    marks: CrossingMark[],
-    length: number
-): [number, number][] {
-    return mergedSpans(marks, 'gap')
+/** The gap spans as merged arc-length intervals clamped to the segment. */
+function gapIntervals(spans: MarkSpan[], length: number): [number, number][] {
+    return mergedSpans(spans, 'gap')
         .map((span): [number, number] => [
-            Math.max(0, span[0]),
-            Math.min(length, span[1]),
+            Math.max(0, span.from),
+            Math.min(length, span.to),
         ])
         .filter(([from, to]) => to - from > EMPTY_INTERVAL);
 }
@@ -715,17 +803,24 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
         }
     }
 
-    for (const [rawFrom, rawTo] of mergedSpans(marks, 'deck')) {
-        const from = Math.max(0, rawFrom);
-        const to = Math.min(length, rawTo);
+    for (const deck of mergedSpans(marks, 'deck')) {
+        const from = Math.max(0, deck.from);
+        const to = Math.min(length, deck.to);
         if (!(to - from > EMPTY_INTERVAL)) continue;
-        const centre = (rawFrom + rawTo) / 2;
+        const centre = (from + to) / 2;
         const run = runs.find(r => centre <= r.s1) ?? runs[runs.length - 1]!;
-        // A clamped end stops at the segment's own end, with no wing.
-        const wings = { start: rawFrom > 0, end: rawTo < length };
+        // A wing is drawn where the span says: a deck that goes on past the
+        // segment's end has none there.
         for (const offset of parapets) {
             strokes.push(
-                parapetStroke(samples, from, to, offset, wings, colorOf(run))
+                parapetStroke(
+                    samples,
+                    from,
+                    to,
+                    offset,
+                    deck.wings,
+                    colorOf(run)
+                )
             );
         }
     }
