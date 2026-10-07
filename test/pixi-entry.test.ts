@@ -74,6 +74,9 @@ describe('pixi entry point', () => {
             'computeTunnelEntranceGeometry',
             'interpolateRgb',
             'getElevationColorRgb',
+            'buildLineTrack',
+            'resolveLineStyle',
+            'classifyCrossing',
         ]) {
             expect(pixi).not.toHaveProperty(name);
         }

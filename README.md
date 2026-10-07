@@ -163,15 +163,29 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       middle of each segment) or `'rails'` (a line along each rail, the
       segment's gauge apart). The line styles show at every zoom level and
       draw the previews the same way. They leave out ballast, beds,
-      shadows, catenary masts and tunnels, but keep the dashed marker over
-      underground track; highlights and snap dots are drawn as in
-      `'detailed'`.
+      shadows, catenary masts and tunnel walls and cuttings. They draw a
+      bridge (parapets and wings) where track crosses at least 3 m over
+      other track, which is cut beneath it, and underground track as
+      lighter, broken lines with a portal where it reaches the surface.
+      Highlights and snap dots are drawn as in `'detailed'`.
+        - Each segment's `lineStyle` (`{ preset?, pattern?, color?, width? }`,
+          saved with the layout) changes how the line styles draw it.
+          Presets are `tunnel` (drawn and treated as underground), `bridge`
+          (parapets along the segment), `planned` (dashed) and `disused`
+          (dotted, grey); set fields win over the preset. Patterns and
+          widths are in screen pixels.
+
+            ```ts
+            graph.setSegmentStyle(n, {
+                lineStyle: { preset: 'planned', color: 0x2266cc },
+            });
+            ```
     - `StationRenderSystem` and `TrackAlignedPlatformRenderSystem`:
       `'detailed'` (the default) or `'outline'`, which outlines each
       platform. The two platforms that make up an island are outlined
       separately, so a line runs down its middle.
-    - Lines are one pixel wide at any zoom, and the line styles need no
-      `textureRenderer`.
+    - Lines are one pixel wide at any zoom unless a `lineStyle` sets a
+      width, and the line styles need no `textureRenderer`.
 - **Joint directions.**
   `new JointDirectionRenderSystem(host, trackGraph, preferenceMap, camera)`
   draws its indicators while the joint-direction tool is shown: call

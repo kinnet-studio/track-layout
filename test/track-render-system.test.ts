@@ -1,6 +1,6 @@
 import { BCurve } from '@ue-too/curve';
 import type { Point } from '@ue-too/math';
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { type Container, type Graphics, Texture } from 'pixi.js';
 
 import {
@@ -25,11 +25,16 @@ import {
     zoomTo,
 } from './pixi-helpers.js';
 import { layTrack } from './station-placement-helpers.js';
+import { layLine } from './track-helpers.js';
 
 const A = { x: 0, y: 0 };
 const B = { x: 100, y: 0 };
 const C = { x: 200, y: 0 };
 const KEY = drawKey(0);
+/** Distance from a track's centre line to its portal bars, for gauge 1.067. */
+const P = 1.067 / 2 + 1.5;
+/** How far a wing reaches along the track: MARK_LENGTH at 45 degrees. */
+const W = 1.5 * Math.SQRT1_2;
 
 /** A renderer on a fresh graph, with the texture stub unless options say otherwise. */
 function scene(options: TrackRenderSystemOptions = {}) {
@@ -575,15 +580,174 @@ describe('TrackRenderSystem: line styles', () => {
         expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(2);
     });
 
-    it('keeps the dashed marker on underground track at every zoom level', async () => {
-        const { host, graph, camera, renderer } = scene();
+    it('draws underground track lighter and dashed, with no overlay', () => {
+        const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
 
         layTrack(graph, [A, B], ELEVATION.SUB_1);
-        await zoomTo(camera, 10);
 
-        expect(host.bandKeys).toEqual(['__simplified__0', '__underground__0']);
-        expect(host.bandItem('__underground__0')!.visible).toBe(true);
+        expect(host.bandKeys).toEqual(['__simplified__0']);
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines.length).toBeGreaterThan(1);
+        for (const line of lines) {
+            expect(line.color).toBe(0x808080);
+        }
+    });
+
+    it('draws a ramp solid above ground and dashed below, with a portal', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        layRamp(graph, ELEVATION.SUB_1, ELEVATION.ABOVE_1);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        const black = lines.filter(line => line.color === 0x000000);
+        expect(black).toHaveLength(2);
+        // The portal's bar runs across the track; the line runs along it.
+        const acrossTrack = (line: StrokedLine) =>
+            line.points.some(point => Math.abs(point.y) > 0.1);
+        const portal = black.find(acrossTrack)!;
+        const above = black.find(line => !acrossTrack(line))!;
+        expect(above.points[0]!.x).toBeCloseTo(50);
+        expect(above.points.at(-1)!.x).toBeCloseTo(100);
+        expect(portal.points[1]!.x).toBeCloseTo(50);
+        expect(Math.abs(portal.points[1]!.y)).toBeCloseTo(P);
+        const grey = lines.filter(line => line.color !== 0x000000);
+        expect(grey.length).toBeGreaterThan(0);
+        for (const line of grey) {
+            expect(line.color).toBe(0x808080);
+            for (const point of line.points) {
+                expect(point.x).toBeLessThanOrEqual(50 + 1e-6);
+            }
+        }
+    });
+
+    it('decides underground with the terrain', () => {
+        const { host, graph, renderer } = scene({ terrain: flatTerrain(5) });
+        renderer.renderStyle = 'centerline';
+
+        layTrack(graph, [A, B]);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) {
+            expect(line.color).toBe(0x808080);
+        }
+    });
+
+    it('draws each segment in its line style', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'disused' } });
+
+        layTrack(graph, [A, B]);
+
+        const dotted = strokedLines(host.bandItem('__simplified__0'));
+        expect(dotted.length).toBeGreaterThan(10);
+        for (const line of dotted) {
+            expect(line.color).toBe(0x999999);
+        }
+
+        graph.setSegmentStyle(0, { lineStyle: { color: 0xff0000 } });
+
+        const red = strokedLines(host.bandItem('__simplified__0'));
+        expect(red).toHaveLength(1);
+        expect(red[0]!.color).toBe(0xff0000);
+    });
+
+    it('draws a wider line at its width in world units', async () => {
+        const { host, graph, camera, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { width: 3 } });
+
+        layTrack(graph, [A, B]);
+
+        const wide = strokedLines(host.bandItem('__simplified__0'));
+        expect(wide.length).toBeGreaterThan(0);
+        for (const line of wide) {
+            expect(line.width).toBe(3);
+            expect(line.pixelLine).toBe(false);
+        }
+
+        await zoomTo(camera, 2);
+
+        const zoomed = strokedLines(host.bandItem('__simplified__0'));
+        expect(zoomed.length).toBeGreaterThan(0);
+        for (const line of zoomed) {
+            expect(line.width).toBe(1.5);
+            expect(line.pixelLine).toBe(false);
+        }
+    });
+
+    it('re-strokes styled lines only at √2 zoom steps', async () => {
+        const { host, graph, camera, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
+        layTrack(graph, [A, B]);
+        graph.setNewSegmentStyle({ lineStyle: undefined });
+        layTrack(graph, [C, { x: 300, y: 0 }]);
+        const plain = host.bandItem('__simplified__1') as Graphics;
+        const cleared = spyOn(plain, 'clear');
+
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(10);
+
+        await zoomTo(camera, 1.3);
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(10);
+
+        await zoomTo(camera, 1.5);
+        expect(strokedLines(host.bandItem('__simplified__0'))).toHaveLength(15);
+
+        expect(cleared).not.toHaveBeenCalled();
+    });
+
+    it('gives a lone tunnel segment a portal at each end', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'tunnel' } });
+
+        layTrack(graph, [A, B]);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        const portals = lines
+            .filter(line => line.color === 0x000000)
+            .sort((a, b) => a.points[1]!.x - b.points[1]!.x);
+        expect(portals).toHaveLength(2);
+        expect(portals[0]!.points[1]!.x).toBeCloseTo(0);
+        expect(portals[1]!.points[1]!.x).toBeCloseTo(100);
+        const rest = lines.filter(line => line.color !== 0x000000);
+        expect(rest.length).toBeGreaterThan(0);
+        for (const line of rest) {
+            expect(line.color).toBe(0x808080);
+        }
+    });
+
+    it('draws the preview in the new-track line style and underground', () => {
+        const curveCreation = fakeCurveCreationSource();
+        const { host, graph, renderer } = scene({
+            curveCreation: curveCreation.source,
+        });
+        renderer.renderStyle = 'centerline';
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
+
+        curveCreation.emit('onPreviewDrawDataChange', previewData(graph));
+
+        const lines = strokedLines(host.bandItem('__preview_rail__0'));
+        expect(lines.length).toBeGreaterThan(1);
+        for (const line of lines) {
+            expect(line.color).toBe(0x000000);
+        }
+    });
+
+    it('keeps the detailed style as it was', () => {
+        const { host, graph } = scene();
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
+
+        layTrack(graph, [A, B], ELEVATION.SUB_1);
+
+        const lines = strokedLines(host.bandItem('__simplified__0'));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]!.color).toBe(0x000000);
+        expect(host.bandKeys).toContain('__underground__0');
     });
 
     it('still reports the band of a draw-data piece', () => {
@@ -623,9 +787,12 @@ describe('TrackRenderSystem: line styles', () => {
 
         expect(host.bandKeys).toEqual(['__preview_rail__0']);
         expect(host.sublayerOf('__preview_rail__0')).toBe('rail');
-        expect(strokedLines(host.bandItem('__preview_rail__0'))).toHaveLength(
-            2
-        );
+        // The preview is under the terrain at 5, so it is lighter and dashed.
+        const lines = strokedLines(host.bandItem('__preview_rail__0'));
+        expect(lines.length).toBeGreaterThan(2);
+        for (const line of lines) {
+            expect(line.color).toBe(0x808080);
+        }
     });
 
     it('draws the preview curve arcs too', () => {
@@ -713,5 +880,343 @@ describe('TrackRenderSystem: line styles', () => {
         renderer.cleanup();
 
         expect(host.bandKeys).toEqual([]);
+    });
+});
+
+describe('TrackRenderSystem: crossings and runs', () => {
+    const GAP = P + 0.5; // half-gap at 90°
+    const DECK = 1.067 / 2 + 1.5; // half-deck at 90°
+    const linesOf = (host: RecordingLayerHost, n: number) =>
+        strokedLines(host.bandItem(`__simplified__${n}`));
+    const xSpans = (lines: StrokedLine[]) =>
+        lines
+            .map(line => [
+                Math.min(...line.points.map(point => point.x)),
+                Math.max(...line.points.map(point => point.x)),
+            ])
+            .sort((a, b) => a[0]! - b[0]!);
+    /** h along y = 0, then v across it at x = 50, one level up. */
+    function crossing(graph: TrackGraph) {
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        const v = layLine(
+            graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        return { h, v };
+    }
+    function expectBridge(host: RecordingLayerHost, h: number, v: number) {
+        const spans = xSpans(linesOf(host, h));
+        expect(spans).toHaveLength(2);
+        expect(spans[0]![1]).toBeCloseTo(50 - GAP, 6);
+        expect(spans[1]![0]).toBeCloseTo(50 + GAP, 6);
+        const parapets = linesOf(host, v).filter(
+            line => Math.abs(line.points[1]!.x - 50) > 1
+        );
+        const xs = parapets
+            .map(line => line.points[1]!.x)
+            .sort((a, b) => a - b);
+        expect(xs).toHaveLength(2);
+        expect(xs[0]).toBeCloseTo(50 - P, 6);
+        expect(xs[1]).toBeCloseTo(50 + P, 6);
+        for (const parapet of parapets) {
+            expect(parapet.points[0]!.y).toBeCloseTo(-DECK - W, 6);
+            expect(parapet.points.at(-1)!.y).toBeCloseTo(DECK + W, 6);
+        }
+    }
+
+    it('draws a bridge where track crosses over other track', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        const { h, v } = crossing(graph);
+
+        expectBridge(host, h, v);
+    });
+
+    it('draws the bridge when the upper track is laid first', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        const v = layLine(
+            graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+
+        expectBridge(host, h, v);
+    });
+
+    it('cuts every rail of the lower track', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'rails';
+
+        const { h, v } = crossing(graph);
+
+        expect(linesOf(host, h)).toHaveLength(4);
+        expect(linesOf(host, v)).toHaveLength(4);
+    });
+
+    it('restores the lower line when the upper track is removed', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = crossing(graph);
+        expect(xSpans(linesOf(host, h))).toHaveLength(2);
+
+        graph.removeTrackSegment(v);
+
+        const spans = xSpans(linesOf(host, h));
+        expect(spans).toHaveLength(1);
+        expect(spans[0]![0]).toBeCloseTo(0, 6);
+        expect(spans[0]![1]).toBeCloseTo(100, 6);
+    });
+
+    it('restores every track a deleted upper track crossed', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h1 = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        const h2 = layLine(graph, { x: 0, y: 20 }, { x: 100, y: 20 });
+        const v = layLine(
+            graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        expect(xSpans(linesOf(host, h1))).toHaveLength(2);
+        expect(xSpans(linesOf(host, h2))).toHaveLength(2);
+
+        graph.removeTrackSegment(v);
+
+        expect(xSpans(linesOf(host, h1))).toHaveLength(1);
+        expect(xSpans(linesOf(host, h2))).toHaveLength(1);
+    });
+
+    it('cuts a gap at each of two crossings', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        layLine(
+            graph,
+            { x: 20, y: -40 },
+            { x: 80, y: -40 },
+            ELEVATION.ABOVE_1,
+            {
+                x: 50,
+                y: 120,
+            }
+        );
+
+        const spans = xSpans(linesOf(host, h));
+
+        expect(spans).toHaveLength(3);
+        for (const u of [
+            (320 - Math.sqrt(51200)) / 640,
+            (320 + Math.sqrt(51200)) / 640,
+        ]) {
+            const x = 20 + 60 * u;
+            expect(spans.some(([from, to]) => from! <= x && x <= to!)).toBe(
+                false
+            );
+        }
+    });
+
+    it('draws nothing at a level crossing', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 });
+
+        expect(linesOf(host, h)).toHaveLength(1);
+        expect(linesOf(host, v)).toHaveLength(1);
+    });
+
+    it('draws nothing where the lower track is underground', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h = layLine(
+            graph,
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            ELEVATION.SUB_1
+        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 });
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        const same = layLine(
+            alone.graph,
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            ELEVATION.SUB_1
+        );
+
+        expect(linesOf(host, h)).toEqual(linesOf(alone.host, same));
+        expect(linesOf(host, v)).toHaveLength(1);
+    });
+
+    it('treats a tunnel preset as underground at a crossing', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'tunnel' } });
+        const v = layLine(
+            graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+
+        expect(linesOf(host, h)).toHaveLength(1);
+        const acrossV = linesOf(host, v).filter(
+            line => Math.abs(line.points[1]!.x - 50) > 1
+        );
+        const ys = acrossV.map(line => line.points[1]!.y).sort((a, b) => a - b);
+        expect(ys).toHaveLength(2);
+        expect(ys[0]).toBeCloseTo(-50, 6);
+        expect(ys[1]).toBeCloseTo(50, 6);
+    });
+
+    it('redraws the lower track when the upper becomes a tunnel', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = crossing(graph);
+        expect(linesOf(host, h)).toHaveLength(2);
+
+        graph.setSegmentStyle(v, { lineStyle: { preset: 'tunnel' } });
+
+        expect(linesOf(host, h)).toHaveLength(1);
+    });
+
+    it('draws bridges after loading a saved layout', async () => {
+        const source = new TrackGraph();
+        crossing(source);
+        const saved = source.serialize();
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+
+        await graph.loadFromSerializedData(saved, {
+            yieldToFrame: async () => {},
+        });
+
+        expectBridge(host, 0, 1);
+    });
+
+    it('keeps bridges right across render-style switches', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = crossing(graph);
+
+        renderer.renderStyle = 'rails';
+        expect(linesOf(host, h)).toHaveLength(4);
+
+        renderer.renderStyle = 'detailed';
+        renderer.renderStyle = 'centerline';
+        expectBridge(host, h, v);
+        expect(
+            host.bandKeys.filter(key => key.startsWith('__simplified__'))
+        ).toEqual(['__simplified__0', '__simplified__1']);
+    });
+
+    it('draws each segment once when a style switch redraws laid track', () => {
+        const { host, graph, renderer } = scene();
+        const { h, v } = crossing(graph);
+        const draw = spyOn(
+            TrackRenderSystem.prototype as any,
+            '_drawLineSegment'
+        );
+        try {
+            renderer.renderStyle = 'centerline';
+
+            expect(draw).toHaveBeenCalledTimes(2);
+        } finally {
+            draw.mockRestore();
+        }
+        expectBridge(host, h, v);
+    });
+
+    it('keeps run ends right when a style switch draws a tunnel run', () => {
+        const { host, graph, renderer } = scene();
+        layTrack(graph, [A, B, C]);
+        const tunnel = { lineStyle: { preset: 'tunnel' as const } };
+        graph.setSegmentStyle(0, tunnel);
+        graph.setSegmentStyle(1, tunnel);
+        const draw = spyOn(
+            TrackRenderSystem.prototype as any,
+            '_drawLineSegment'
+        );
+        try {
+            renderer.renderStyle = 'centerline';
+
+            expect(draw).toHaveBeenCalledTimes(2);
+        } finally {
+            draw.mockRestore();
+        }
+        const portalXs = (n: number) =>
+            linesOf(host, n)
+                .filter(line => line.color === 0x000000)
+                .map(line => line.points[1]!.x);
+        expect(portalXs(0)).toHaveLength(1);
+        expect(portalXs(0)[0]).toBeCloseTo(0, 6);
+        expect(portalXs(1)).toHaveLength(1);
+        expect(portalXs(1)[0]).toBeCloseTo(200, 6);
+    });
+
+    it('puts tunnel portals only at the ends of a tunnel run', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, C]);
+        const tunnel = { lineStyle: { preset: 'tunnel' as const } };
+        const portalXs = (n: number) =>
+            linesOf(host, n)
+                .filter(line => line.color === 0x000000)
+                .map(line => line.points[1]!.x)
+                .sort((a, b) => a - b);
+
+        graph.setSegmentStyle(0, tunnel);
+        const alone = portalXs(0);
+        expect(alone).toHaveLength(2);
+        expect(alone[0]).toBeCloseTo(0, 6);
+        expect(alone[1]).toBeCloseTo(100, 6);
+
+        graph.setSegmentStyle(1, tunnel);
+        const first = portalXs(0);
+        const second = portalXs(1);
+        expect(first).toHaveLength(1);
+        expect(first[0]).toBeCloseTo(0, 6);
+        expect(second).toHaveLength(1);
+        expect(second[0]).toBeCloseTo(200, 6);
+
+        graph.removeTrackSegment(1);
+        expect(portalXs(0)).toHaveLength(2);
+    });
+
+    it('puts viaduct wings only at the ends of a bridge run', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layTrack(graph, [A, B, C]);
+        const bridge = { lineStyle: { preset: 'bridge' as const } };
+        const parapets = (n: number) =>
+            linesOf(host, n).filter(line => Math.abs(line.points[1]!.y) > 1);
+
+        graph.setSegmentStyle(0, bridge);
+        const alone = parapets(0);
+        expect(alone).toHaveLength(2);
+        for (const parapet of alone) {
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(100 + W, 6);
+        }
+
+        graph.setSegmentStyle(1, bridge);
+        const first = parapets(0);
+        const second = parapets(1);
+        expect(first).toHaveLength(2);
+        expect(second).toHaveLength(2);
+        for (const parapet of first) {
+            expect(parapet.points.at(-1)!.x).toBeCloseTo(100, 6);
+        }
+        for (const parapet of second) {
+            expect(parapet.points[0]!.x).toBeCloseTo(100, 6);
+        }
     });
 });

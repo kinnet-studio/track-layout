@@ -25,9 +25,24 @@ import {
     TrackSegmentDrawData,
     TrackSegmentWithCollision,
 } from '../index.js';
-import type { SegmentStyleChange } from '../index.js';
+import type { SegmentStyleChange, TrackLineStyle } from '../index.js';
 import { ballastHalfWidth } from './geometry-utils.js';
 import type { LayerHost } from './layer-host.js';
+import {
+    type CrossingMark,
+    type CrossingSide,
+    type LineHeights,
+    type LineTrackDrawing,
+    type LineTrackInput,
+    RESTROKE_ZOOM_STEP,
+    type RunEndNeighbour,
+    buildLineTrack,
+    buriedByTerrain,
+    crossingMark,
+    isUnderground,
+    needsRunEndMark,
+    sampleLine,
+} from './line-track-geometry.js';
 import type {
     CatenaryLayoutPreviewSource,
     CurveCreationPreviewSource,
@@ -70,8 +85,52 @@ const SHADOW_TEX_SIZE = 4;
 /** Size of the tiny solid-color textures used for tunnel meshes. */
 const TUNNEL_TEX_SIZE = 4;
 
-/** Arc length (meters) between the points of line-style track, as for the rail mesh. */
-const LINE_TRACK_SAMPLE_LEN = 2;
+/** What the renderer keeps of a line-style segment to stroke it again on a zoom or style change. */
+type LineTrackRecord = {
+    graphics: Graphics;
+    /** What the graphics were built from, at the zoom they were last stroked at. */
+    input: LineTrackInput;
+    /** Whether the strokes depend on the zoom (see `LineTrackDrawing.styled`). */
+    styled: boolean;
+    /** The camera zoom level the graphics were last stroked at. */
+    strokeZoom: number;
+    /** The joint and end point at each end of the segment: start, then end. */
+    ends: { joint: number; position: Point }[];
+};
+
+/** Whether a segment's ends can get a portal or wings, which depend on what meets them. */
+const hasRunEnds = (lineStyle: TrackLineStyle | undefined): boolean =>
+    lineStyle?.preset === 'tunnel' || lineStyle?.preset === 'bridge';
+
+/** A segment's joints and the points they sit at: the first and last control points. */
+const lineEndsOf = (
+    segment: TrackSegmentWithCollision
+): LineTrackRecord['ends'] => {
+    const controlPoints = segment.curve.getControlPoints();
+    return [
+        { joint: segment.t0Joint, position: controlPoints[0]! },
+        { joint: segment.t1Joint, position: controlPoints.at(-1)! },
+    ];
+};
+
+/** A segment's heights in metres, at its two ends. */
+const heightsOf = (segment: TrackSegmentWithCollision): LineHeights => ({
+    from: segment.elevation.from * LEVEL_HEIGHT,
+    to: segment.elevation.to * LEVEL_HEIGHT,
+});
+
+/**
+ * Whether the end of a segment at `t` (0 or 1) gets a portal or wings when no
+ * other segment meets it.
+ */
+const openRunEnd = (
+    lineStyle: TrackLineStyle | undefined,
+    heights: LineHeights,
+    t: 0 | 1,
+    point: Point,
+    terrain: TerrainSampler | null
+): boolean =>
+    needsRunEndMark(lineStyle, buriedByTerrain(heights, t, point, terrain), []);
 
 /** Compute the rail mesh half-width (always derived from gauge — not affected by ballast width). */
 const railHalfWidth = (drawData: TrackSegmentDrawData): number => {
@@ -79,32 +138,6 @@ const railHalfWidth = (drawData: TrackSegmentDrawData): number => {
     const tieOverhang = style === 'slab' ? 0 : 4;
     const texFullWidth = TRACK_TEX_SIZE + tieOverhang * 2;
     return (drawData.gauge / 2) * (texFullWidth / TRACK_TEX_SIZE);
-};
-
-/**
- * Points along `curve`, every {@link LINE_TRACK_SAMPLE_LEN} meters of arc
- * length, each with the curve's unit normal there. Sampling is the costly
- * part, so the rails share one set of samples.
- */
-const sampleCurve = (curve: BCurve): { point: Point; normal: Point }[] => {
-    const steps = Math.max(
-        2,
-        Math.ceil(curve.fullLength / LINE_TRACK_SAMPLE_LEN)
-    );
-    const controlPoints = curve.getControlPoints();
-    const samples: { point: Point; normal: Point }[] = [];
-    for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const point =
-            i === 0
-                ? controlPoints[0]
-                : i === steps
-                  ? controlPoints[controlPoints.length - 1]
-                  : curve.getPointbyPercentage(t);
-        const tangent = PointCal.unitVector(curve.derivativeByPercentage(t));
-        samples.push({ point, normal: { x: -tangent.y, y: tangent.x } });
-    }
-    return samples;
 };
 
 /** A one-pixel line along `curve`, which Pixi draws as a Bezier curve. */
@@ -143,9 +176,12 @@ const buildBezierLine = (curve: BCurve): Graphics => {
  * - `rails`: a line along each rail, the track's gauge apart, at every zoom
  *   level.
  *
- * Lines are one pixel wide at any zoom. The line styles leave out ballast,
- * beds, shadows, catenary masts and tunnels (the dashed marker over
- * underground track stays), and need no texture renderer.
+ * The line styles draw bridges at grade-separated crossings, underground
+ * track lighter and broken with portals where it meets the ground, and each
+ * segment in its `lineStyle` (a preset, pattern, colour and width in screen
+ * pixels; one pixel, black and solid by default). They leave out ballast,
+ * beds, shadows, catenary masts and tunnel walls and cuttings, and need no
+ * texture renderer.
  */
 export type TrackRenderStyle = 'detailed' | 'centerline' | 'rails';
 
@@ -278,6 +314,19 @@ export class TrackRenderSystem {
         number,
         { graphics: Graphics; bandKey: string }
     > = new Map();
+
+    /**
+     * Line-style segments by curve number, as the `centerline` and `rails`
+     * styles draw them. Empty in `detailed`.
+     */
+    private _lineTracks: Map<number, LineTrackRecord> = new Map();
+
+    /**
+     * For each line-style segment that has been drawn, the segments that cross
+     * it, as of when it was last drawn. Both ways: when one is drawn or
+     * removed the other is redrawn. Empty in `detailed`.
+     */
+    private _linePartners: Map<number, Set<number>> = new Map();
 
     /** Tunnel enclosure meshes (walls + ceiling) for fully underground segments, keyed by draw data key. */
     private _tunnelWallMap: Map<string, MeshSimple> = new Map();
@@ -450,16 +499,23 @@ export class TrackRenderSystem {
     }
 
     /**
-     * Draws the track the manager already holds, through the same handlers
-     * that draw track added later.
+     * Draws the track the manager already holds. The detailed style goes
+     * through the same handler that draws track added later. A line style
+     * draws each segment once: the model already holds every segment, so the
+     * first draw of each sees all its crossing partners and neighbours, and
+     * the redraws that adding a segment does for them would only repeat it.
      */
     private _drawExistingTrack(): void {
+        const lineStyle = this._renderStyle !== 'detailed';
         for (const segmentNumber of this._trackCurveManager.livingEntities) {
             const segment =
                 this._trackCurveManager.getTrackSegmentWithJoints(
                     segmentNumber
                 );
-            if (segment !== null) {
+            if (segment === null) continue;
+            if (lineStyle) {
+                this._drawLineSegment(segmentNumber, segment);
+            } else {
                 this._onAddTrackSegment(segmentNumber, segment);
             }
         }
@@ -493,11 +549,15 @@ export class TrackRenderSystem {
      * Redraws every piece of a segment whose style changed in the model
      * (TrackGraph.setSegmentStyle). The draw data already carries the new
      * style, so each piece goes through the same remove-and-add path as a
-     * draw-data change.
+     * draw-data change. A line-style segment is drawn again in place, along
+     * with the segments it crosses and the `tunnel` and `bridge` segments at
+     * its ends, whose gaps, decks, portals or wings can change with it.
      */
     private _onSegmentStyleChanged({
         segmentNumber,
     }: SegmentStyleChange): void {
+        this._redrawLineSegment(segmentNumber);
+        this._redrawLineNeighboursOf(segmentNumber);
         const pieces = this._trackCurveManager.persistedDrawData.filter(
             drawData =>
                 drawData.originalTrackSegment.trackSegmentNumber ===
@@ -555,6 +615,7 @@ export class TrackRenderSystem {
 
     private _onZoom(_event: CameraZoomEventPayload, cameraState: CameraState) {
         this._applyZoomLod(cameraState.zoomLevel);
+        this._restrokeLineTracks(cameraState.zoomLevel);
         // Redraw preview so radius labels pick up new zoom-based font size.
         if (this._showPreviewCurveArcs) {
             this._onPreviewDrawDataChange(this._latestPreviewDrawDataList);
@@ -693,28 +754,336 @@ export class TrackRenderSystem {
         this._previewEndProjection.tint = color;
     }
 
+    /** The line style in use, for the geometry. Call it only in `centerline` or `rails`. */
+    private _lineRenderStyle(): 'centerline' | 'rails' {
+        return this._renderStyle === 'rails' ? 'rails' : 'centerline';
+    }
+
     /**
-     * One-pixel lines along `curve` in the current line style: one along the
-     * middle, or one along each rail, `gauge` meters apart. Pixi's own Bezier
-     * is too coarse for this when zoomed in, so the lines are sampled.
+     * What the geometry needs to draw `segment` in the current line style:
+     * its samples, its heights in metres, the decks and gaps the tracks that
+     * cross it put on it, and whether each end gets a portal or wings, given
+     * what else meets it there. It also records who crosses it, in
+     * `_linePartners`.
      */
-    private _buildLineTrack(curve: BCurve, gauge: number): Graphics {
-        const graphics = new Graphics();
-        const samples = sampleCurve(curve);
-        // 0 for the middle of the track, ±gauge / 2 for the rails.
-        const offsets =
-            this._renderStyle === 'rails' ? [-gauge / 2, gauge / 2] : [0];
-        for (const offset of offsets) {
-            const [first, ...rest] = samples.map(({ point, normal }) => ({
-                x: point.x + normal.x * offset,
-                y: point.y + normal.y * offset,
-            }));
-            graphics.moveTo(first.x, first.y);
-            for (const point of rest) {
-                graphics.lineTo(point.x, point.y);
+    private _lineInputFor(
+        curveNumber: number,
+        segment: TrackSegmentWithCollision,
+        ends: LineTrackRecord['ends']
+    ): LineTrackInput {
+        const { lineStyle, gauge } = segment;
+        const samples = sampleLine(segment.curve);
+        const heights = heightsOf(segment);
+        const terrain = this._terrainData;
+        const renderStyle = this._lineRenderStyle();
+        return {
+            samples,
+            heights,
+            gauge,
+            lineStyle,
+            renderStyle,
+            terrain,
+            metresPerPixel: 1 / this._camera.zoomLevel,
+            marks: this._crossingMarks(curveNumber, segment, heights),
+            runEnds: {
+                start: this._needsRunEndMark(curveNumber, segment, ends[0]!, 0),
+                end: this._needsRunEndMark(curveNumber, segment, ends[1]!, 1),
+            },
+        };
+    }
+
+    /**
+     * The decks and gaps that the tracks crossing `segment` put on it. It
+     * also sets which segments those are in `_linePartners`, level crossings
+     * included, since a change to either can turn a crossing into a bridge.
+     */
+    private _crossingMarks(
+        curveNumber: number,
+        segment: TrackSegmentWithCollision,
+        heights: LineHeights
+    ): CrossingMark[] {
+        const marks: CrossingMark[] = [];
+        const partners = new Set<number>();
+        const renderStyle = this._lineRenderStyle();
+        for (const crossing of this._trackCurveManager.getCrossings(
+            curveNumber
+        )) {
+            const other = this._trackCurveManager.getTrackSegmentWithJoints(
+                crossing.otherSegment
+            );
+            if (other === null) continue;
+            partners.add(crossing.otherSegment);
+            const self: CrossingSide = {
+                curve: segment.curve,
+                t: crossing.t,
+                gauge: segment.gauge,
+                heights,
+                lineStyle: segment.lineStyle,
+            };
+            const across: CrossingSide = {
+                curve: other.curve,
+                t: crossing.otherT,
+                gauge: other.gauge,
+                heights: heightsOf(other),
+                lineStyle: other.lineStyle,
+            };
+            const mark = crossingMark(
+                self,
+                across,
+                this._terrainData,
+                renderStyle
+            );
+            if (mark !== null) marks.push(mark);
+        }
+        this._linePartners.set(curveNumber, partners);
+        for (const partner of partners) {
+            const theirs = this._linePartners.get(partner) ?? new Set<number>();
+            theirs.add(curveNumber);
+            this._linePartners.set(partner, theirs);
+        }
+        return marks;
+    }
+
+    /**
+     * Whether the end of `segment` at `end`, which is at `t` (0 for the start,
+     * 1 for the finish), gets a portal or wings. Only the ends of a run of
+     * `tunnel` or `bridge` segments do, so it looks at what else meets the joint.
+     */
+    private _needsRunEndMark(
+        curveNumber: number,
+        segment: TrackSegmentWithCollision,
+        end: LineTrackRecord['ends'][number],
+        t: 0 | 1
+    ): boolean {
+        const { lineStyle } = segment;
+        if (!hasRunEnds(lineStyle)) return false;
+        const terrain = this._terrainData;
+        const neighbours: RunEndNeighbour[] = [];
+        for (const number of this._trackCurveManager.getSegmentsAtJoint(
+            end.joint,
+            end.position
+        )) {
+            if (number === curveNumber) continue;
+            const other =
+                this._trackCurveManager.getTrackSegmentWithJoints(number);
+            if (other === null) continue;
+            neighbours.push({
+                lineStyle: other.lineStyle,
+                underground: isUnderground(
+                    heightsOf(other),
+                    other.t0Joint === end.joint ? 0 : 1,
+                    end.position,
+                    other.lineStyle,
+                    terrain
+                ),
+            });
+        }
+        return needsRunEndMark(
+            lineStyle,
+            buriedByTerrain(heightsOf(segment), t, end.position, terrain),
+            neighbours
+        );
+    }
+
+    /**
+     * The segments at `ends`, other than `curveNumber`, that are `tunnel` or
+     * `bridge` segments: the ones whose portals or wings depend on it.
+     */
+    private _presetNeighbours(
+        curveNumber: number,
+        ends: LineTrackRecord['ends']
+    ): number[] {
+        const found = new Set<number>();
+        for (const { joint, position } of ends) {
+            for (const number of this._trackCurveManager.getSegmentsAtJoint(
+                joint,
+                position
+            )) {
+                if (number === curveNumber) continue;
+                const other =
+                    this._trackCurveManager.getTrackSegmentWithJoints(number);
+                if (other !== null && hasRunEnds(other.lineStyle)) {
+                    found.add(number);
+                }
             }
         }
-        graphics.stroke({ color: 0x000000, pixelLine: true });
+        return [...found];
+    }
+
+    /**
+     * Redraws what a change to `curveNumber` can change in other segments: the
+     * ones that cross it, which get or lose a deck or a gap, and the `tunnel`
+     * and `bridge` segments at its ends, which get or lose a portal or wings.
+     * A segment that isn't drawn is skipped, which is what lets track load in
+     * any order.
+     */
+    private _redrawLineNeighbours(
+        curveNumber: number,
+        partners: Iterable<number>,
+        ends: LineTrackRecord['ends']
+    ): void {
+        const affected = new Set([
+            ...partners,
+            ...this._presetNeighbours(curveNumber, ends),
+        ]);
+        for (const number of affected) {
+            this._redrawLineSegment(number);
+        }
+    }
+
+    /** {@link _redrawLineNeighbours} for a segment that is drawn; does nothing for one that isn't. */
+    private _redrawLineNeighboursOf(curveNumber: number): void {
+        const record = this._lineTracks.get(curveNumber);
+        if (record === undefined) return;
+        this._redrawLineNeighbours(
+            curveNumber,
+            this._linePartners.get(curveNumber) ?? [],
+            record.ends
+        );
+    }
+
+    /**
+     * Draws a segment in the current line style: into a new graphics object
+     * in the band of its higher end, or, when it is drawn already, into the
+     * same one, cleared.
+     */
+    private _drawLineSegment(
+        curveNumber: number,
+        segment: TrackSegmentWithCollision
+    ): void {
+        const ends = lineEndsOf(segment);
+        const input = this._lineInputFor(curveNumber, segment, ends);
+        const drawing = buildLineTrack(input);
+        const zoom = this._camera.zoomLevel;
+        const drawn = this._lineTracks.get(curveNumber);
+        const graphics = drawn?.graphics ?? new Graphics();
+        if (drawn !== undefined) graphics.clear();
+        this._strokeLineDrawing(graphics, drawing, zoom);
+        this._lineTracks.set(curveNumber, {
+            graphics,
+            input,
+            styled: drawing.styled,
+            strokeZoom: zoom,
+            ends,
+        });
+        if (drawn !== undefined) return;
+
+        const bandKey = `__simplified__${curveNumber}`;
+        const bandIndex = this._worldRenderSystem.getElevationBandIndex(
+            Math.max(input.heights.from, input.heights.to)
+        );
+        this._worldRenderSystem.addToBand(bandKey, graphics, bandIndex, 'rail');
+        this._simplifiedTrackGraphicsMap.set(curveNumber, {
+            graphics,
+            bandKey,
+        });
+    }
+
+    /** Draws a line-style segment again from the model; does nothing for one that isn't drawn. */
+    private _redrawLineSegment(curveNumber: number): void {
+        if (!this._lineTracks.has(curveNumber)) return;
+        const segment =
+            this._trackCurveManager.getTrackSegmentWithJoints(curveNumber);
+        if (segment !== null) {
+            this._drawLineSegment(curveNumber, segment);
+        }
+    }
+
+    /**
+     * Strokes a drawing into `graphics` at camera zoom level `zoom`: one
+     * stroke per colour. A one-pixel line is a `pixelLine`; a wider one is
+     * `width` screen pixels in world units.
+     */
+    private _strokeLineDrawing(
+        graphics: Graphics,
+        drawing: LineTrackDrawing,
+        zoom: number
+    ): void {
+        const polylinesByColor = new Map<number, Point[][]>();
+        for (const { points, color } of drawing.strokes) {
+            const polylines = polylinesByColor.get(color) ?? [];
+            polylines.push(points);
+            polylinesByColor.set(color, polylines);
+        }
+        for (const [color, polylines] of polylinesByColor) {
+            for (const [first, ...rest] of polylines) {
+                graphics.moveTo(first!.x, first!.y);
+                for (const point of rest) {
+                    graphics.lineTo(point.x, point.y);
+                }
+            }
+            graphics.stroke(
+                drawing.width === 1
+                    ? { color, pixelLine: true }
+                    : { color, width: drawing.width / zoom }
+            );
+        }
+    }
+
+    /**
+     * Strokes again each segment whose lines depend on the zoom, once the zoom
+     * has moved a {@link RESTROKE_ZOOM_STEP} from where they were stroked.
+     */
+    private _restrokeLineTracks(zoom: number): void {
+        for (const record of this._lineTracks.values()) {
+            const moved = Math.max(
+                zoom / record.strokeZoom,
+                record.strokeZoom / zoom
+            );
+            if (!record.styled || moved < RESTROKE_ZOOM_STEP) continue;
+            record.input = { ...record.input, metresPerPixel: 1 / zoom };
+            record.graphics.clear();
+            this._strokeLineDrawing(
+                record.graphics,
+                buildLineTrack(record.input),
+                zoom
+            );
+            record.strokeZoom = zoom;
+        }
+    }
+
+    /**
+     * A preview piece in the current line style: its own elevation, the
+     * new-track style it carries, and no crossings. Only the ends of the
+     * piece that are the segment's own get a portal or wings.
+     */
+    private _buildLinePreview(drawData: TrackSegmentDrawData): Graphics {
+        const { curve, elevation: heights, lineStyle, gauge } = drawData;
+        const { tValInterval } = drawData.originalTrackSegment;
+        const samples = sampleLine(curve);
+        const terrain = this._terrainData;
+        const zoom = this._camera.zoomLevel;
+        const drawing = buildLineTrack({
+            samples,
+            heights,
+            gauge,
+            lineStyle,
+            renderStyle: this._lineRenderStyle(),
+            terrain,
+            metresPerPixel: 1 / zoom,
+            runEnds: {
+                start:
+                    tValInterval.start === 0 &&
+                    openRunEnd(
+                        lineStyle,
+                        heights,
+                        0,
+                        samples[0]!.point,
+                        terrain
+                    ),
+                end:
+                    tValInterval.end === 1 &&
+                    openRunEnd(
+                        lineStyle,
+                        heights,
+                        1,
+                        samples[samples.length - 1]!.point,
+                        terrain
+                    ),
+            },
+        });
+        const graphics = new Graphics();
+        this._strokeLineDrawing(graphics, drawing, zoom);
         return graphics;
     }
 
@@ -786,6 +1155,8 @@ export class TrackRenderSystem {
             removed?.destroy({ children: true });
         });
         this._simplifiedTrackGraphicsMap.clear();
+        this._lineTracks.clear();
+        this._linePartners.clear();
 
         this._undergroundIndicatorMap.forEach(entry => {
             const removed = this._worldRenderSystem.removeFromBand(
@@ -1987,6 +2358,26 @@ export class TrackRenderSystem {
         });
     }
 
+    /**
+     * Drops a removed line-style segment's record and partner links, then
+     * redraws what it was crossing, which loses its deck or gap, and the
+     * `tunnel` and `bridge` segments at its ends, whose run ends may change.
+     * The model no longer has the segment, so only what was recorded about it
+     * is used.
+     */
+    private _forgetLineSegment(curveNumber: number): void {
+        const record = this._lineTracks.get(curveNumber);
+        const partners = [...(this._linePartners.get(curveNumber) ?? [])];
+        this._lineTracks.delete(curveNumber);
+        this._linePartners.delete(curveNumber);
+        for (const partner of partners) {
+            this._linePartners.get(partner)?.delete(curveNumber);
+        }
+        if (record !== undefined) {
+            this._redrawLineNeighbours(curveNumber, partners, record.ends);
+        }
+    }
+
     private _onRemoveTrackSegment(curveNumber: number) {
         const entry = this._simplifiedTrackGraphicsMap.get(curveNumber);
         if (entry !== undefined) {
@@ -1996,6 +2387,7 @@ export class TrackRenderSystem {
             removed?.destroy({ children: true });
             this._simplifiedTrackGraphicsMap.delete(curveNumber);
         }
+        this._forgetLineSegment(curveNumber);
 
         const ugEntry = this._undergroundIndicatorMap.get(curveNumber);
         if (ugEntry !== undefined) {
@@ -2011,10 +2403,13 @@ export class TrackRenderSystem {
         curveNumber: number,
         trackSegment: TrackSegmentWithCollision
     ) {
-        const simplifiedTrackGraphics =
-            this._renderStyle === 'detailed'
-                ? buildBezierLine(trackSegment.curve)
-                : this._buildLineTrack(trackSegment.curve, trackSegment.gauge);
+        if (this._renderStyle !== 'detailed') {
+            this._drawLineSegment(curveNumber, trackSegment);
+            this._redrawLineNeighboursOf(curveNumber);
+            return;
+        }
+
+        const simplifiedTrackGraphics = buildBezierLine(trackSegment.curve);
 
         const rawElevation = Math.max(
             trackSegment.elevation.from * LEVEL_HEIGHT,
@@ -2760,9 +3155,7 @@ export class TrackRenderSystem {
             }
 
             const railContainer = new Container();
-            railContainer.addChild(
-                this._buildLineTrack(drawData.curve, drawData.gauge)
-            );
+            railContainer.addChild(this._buildLinePreview(drawData));
             this._worldRenderSystem.addToBand(
                 `__preview_rail__${this._previewRailContainers.length}`,
                 railContainer,

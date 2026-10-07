@@ -1,4 +1,12 @@
-import type { TrackSegment, TrackStyle } from './types.js';
+import {
+    LINE_PATTERNS,
+    LINE_PRESETS,
+    type LinePattern,
+    type LinePreset,
+    type TrackLineStyle,
+    type TrackSegment,
+    type TrackStyle,
+} from './types.js';
 
 /** Appearance applied to segments when they are created. */
 export type SegmentStyle = {
@@ -9,12 +17,19 @@ export type SegmentStyle = {
     bed: boolean;
     /** Bed width in metres, applied to new segments while `bed` is on. */
     bedWidth: number;
+    /** How the line render styles draw this segment; unset fields come from the preset. */
+    lineStyle?: TrackLineStyle;
 };
 
 /** The style fields stored on each segment and saved with it. */
 export type SegmentStyleFields = Pick<
     TrackSegment,
-    'trackStyle' | 'electrified' | 'catenarySide' | 'bed' | 'bedWidth'
+    | 'trackStyle'
+    | 'electrified'
+    | 'catenarySide'
+    | 'bed'
+    | 'bedWidth'
+    | 'lineStyle'
 >;
 
 /** Payload of TrackGraph.onSegmentStyleChanged. */
@@ -31,6 +46,49 @@ export const DEFAULT_SEGMENT_STYLE: Readonly<SegmentStyle> = Object.freeze({
 });
 
 /**
+ * The one gate every `lineStyle` goes through before the model stores it, so
+ * a stored style is always one `validateSerializedTrackData` accepts and the
+ * renderer can rely on. Returns a new object holding only what is valid:
+ *
+ * - `preset` if it is in {@link LINE_PRESETS}, `pattern` if it is in
+ *   {@link LINE_PATTERNS};
+ * - `color` if it is an integer from 0 to 0xFFFFFF;
+ * - `width` clamped to 1 to 8 if it is a finite number.
+ *
+ * Anything else is dropped: other values, unknown keys (only these four keys
+ * are read, so a `__proto__` key can't reach the copy), and a style that is
+ * `null` or not an object. The result is undefined when nothing is left, so an
+ * empty style is stored as unset. The copy keeps two segments from sharing one
+ * object.
+ */
+export function normalizeLineStyle(
+    style: TrackLineStyle | undefined
+): TrackLineStyle | undefined {
+    if (typeof style !== 'object' || style === null) {
+        return undefined;
+    }
+    const { preset, pattern, color, width } = style as Record<string, unknown>;
+    const copy: TrackLineStyle = {};
+    if ((LINE_PRESETS as readonly unknown[]).includes(preset)) {
+        copy.preset = preset as LinePreset;
+    }
+    if ((LINE_PATTERNS as readonly unknown[]).includes(pattern)) {
+        copy.pattern = pattern as LinePattern;
+    }
+    if (
+        Number.isInteger(color) &&
+        (color as number) >= 0 &&
+        (color as number) <= 0xffffff
+    ) {
+        copy.color = color as number;
+    }
+    if (typeof width === 'number' && Number.isFinite(width)) {
+        copy.width = Math.min(8, Math.max(1, width));
+    }
+    return Object.keys(copy).length > 0 ? copy : undefined;
+}
+
+/**
  * The fields stored on a segment laid with `style`. The bed width is only
  * stored while the bed is on, because snapping, parallel spacing and platform
  * offsets treat a stored bed width as the track's footprint.
@@ -44,6 +102,7 @@ export function segmentFieldsFromStyle(
         catenarySide: style.catenarySide,
         bed: style.bed,
         bedWidth: style.bed ? style.bedWidth : undefined,
+        lineStyle: normalizeLineStyle(style.lineStyle),
     };
 }
 
@@ -60,6 +119,7 @@ export function withStyleDefaults(
         bedWidth:
             saved.bedWidth ??
             (bed ? DEFAULT_SEGMENT_STYLE.bedWidth : undefined),
+        lineStyle: normalizeLineStyle(saved.lineStyle),
     };
 }
 
@@ -71,6 +131,7 @@ export function styleFieldsOf(segment: SegmentStyleFields): SegmentStyleFields {
         catenarySide: segment.catenarySide,
         bed: segment.bed,
         bedWidth: segment.bedWidth,
+        lineStyle: normalizeLineStyle(segment.lineStyle),
     };
 }
 
@@ -80,6 +141,7 @@ const STYLE_KEYS = [
     'catenarySide',
     'bed',
     'bedWidth',
+    'lineStyle',
 ] as const;
 
 /**
@@ -104,5 +166,6 @@ export function applyStylePatch(
             ? Math.max(1, width)
             : DEFAULT_SEGMENT_STYLE.bedWidth
         : undefined;
+    merged.lineStyle = normalizeLineStyle(merged.lineStyle);
     return merged;
 }
