@@ -101,10 +101,31 @@ type LineTrackRecord = {
     strokeZoom: number;
     /** The joint and end point at each end of the segment: start, then end. */
     ends: { joint: number; position: Point }[];
+    /** The box the segment's curve fits in. */
+    box: Box;
 };
 
-/** What a segment's crossings put on it, and who crosses it. */
-type CrossingMarks = { marks: CrossingMark[]; partners: Set<number> };
+/** An axis-aligned box. */
+type Box = { min: Point; max: Point };
+
+/** How far apart (metres) two boxes can be and still count as overlapping: room for rounding. */
+const BOX_SLACK = 1e-6;
+
+/** Whether boxes `a` and `b` overlap or touch, give or take {@link BOX_SLACK}. */
+const boxesOverlap = (a: Box, b: Box): boolean =>
+    a.min.x <= b.max.x + BOX_SLACK &&
+    b.min.x <= a.max.x + BOX_SLACK &&
+    a.min.y <= b.max.y + BOX_SLACK &&
+    b.min.y <= a.max.y + BOX_SLACK;
+
+/**
+ * What a segment's crossings put on it, and who crosses it. Cached, so it is
+ * never changed once found.
+ */
+type CrossingMarks = {
+    marks: readonly CrossingMark[];
+    partners: ReadonlySet<number>;
+};
 
 /**
  * `metres` clamped to 0 to `MAX_MARK_HALF_LENGTH`, the most a mark can reach,
@@ -357,11 +378,15 @@ export class TrackRenderSystem {
     private _linePartners: Map<number, Set<number>> = new Map();
 
     /**
-     * The crossings of each segment, found once while a model event is handled
-     * (see {@link _withMarkMemo}). Null outside one, so nothing carries over
-     * from an event to the next.
+     * The crossings of each line-style segment (see {@link _crossingMarksOf}),
+     * kept from one model event to the next. An event drops what it can
+     * change before anything is drawn: adding or removing a segment drops its
+     * own, its partners' and its near neighbours' (see {@link _dropMarksOf}
+     * and {@link _dropMarksNear}), a change of preset its own and its
+     * partners', and a render-style switch or a new gap clearance all of
+     * them. Empty in `detailed`.
      */
-    private _markMemo: Map<number, CrossingMarks> | null = null;
+    private _markCache: Map<number, CrossingMarks> = new Map();
 
     /** Tunnel enclosure meshes (walls + ceiling) for fully underground segments, keyed by draw data key. */
     private _tunnelWallMap: Map<string, MeshSimple> = new Map();
@@ -546,21 +571,18 @@ export class TrackRenderSystem {
      */
     private _drawExistingTrack(): void {
         const lineStyle = this._renderStyle !== 'detailed';
-        this._withMarkMemo(() => {
-            for (const segmentNumber of this._trackCurveManager
-                .livingEntities) {
-                const segment =
-                    this._trackCurveManager.getTrackSegmentWithJoints(
-                        segmentNumber
-                    );
-                if (segment === null) continue;
-                if (lineStyle) {
-                    this._drawLineSegment(segmentNumber, segment);
-                } else {
-                    this._onAddTrackSegment(segmentNumber, segment);
-                }
+        for (const segmentNumber of this._trackCurveManager.livingEntities) {
+            const segment =
+                this._trackCurveManager.getTrackSegmentWithJoints(
+                    segmentNumber
+                );
+            if (segment === null) continue;
+            if (lineStyle) {
+                this._drawLineSegment(segmentNumber, segment);
+            } else {
+                this._onAddTrackSegment(segmentNumber, segment);
             }
-        });
+        }
         const drawData = this._trackCurveManager.persistedDrawData;
         if (drawData.length > 0) {
             this._onNewTrackData(-1, drawData);
@@ -598,10 +620,14 @@ export class TrackRenderSystem {
     private _onSegmentStyleChanged({
         segmentNumber,
     }: SegmentStyleChange): void {
-        this._withMarkMemo(() => {
-            this._redrawLineSegment(segmentNumber);
-            this._redrawLineNeighboursOf(segmentNumber);
-        });
+        if (this._presetChanged(segmentNumber)) {
+            this._dropMarksOf(
+                segmentNumber,
+                this._linePartners.get(segmentNumber) ?? []
+            );
+        }
+        this._redrawLineSegment(segmentNumber);
+        this._redrawLineNeighboursOf(segmentNumber);
         const pieces = this._trackCurveManager.persistedDrawData.filter(
             drawData =>
                 drawData.originalTrackSegment.trackSegmentNumber ===
@@ -673,12 +699,11 @@ export class TrackRenderSystem {
         const clearance = clampGapClearance(metres, this._bridgeGapClearance);
         if (clearance === this._bridgeGapClearance) return;
         this._bridgeGapClearance = clearance;
+        this._markCache.clear();
         if (this._renderStyle === 'detailed') return;
-        this._withMarkMemo(() => {
-            for (const curveNumber of this._lineTracks.keys()) {
-                this._redrawLineSegment(curveNumber);
-            }
-        });
+        for (const curveNumber of this._lineTracks.keys()) {
+            this._redrawLineSegment(curveNumber);
+        }
     }
 
     private _onZoom(_event: CameraZoomEventPayload, cameraState: CameraState) {
@@ -861,37 +886,72 @@ export class TrackRenderSystem {
     }
 
     /**
-     * Runs `handle`, which handles a model event, with the crossings of each
-     * segment found once however many draws ask for them: an event redraws a
-     * segment, the ones that cross it and the ones in reach of both, and each
-     * draw asks for the marks of every segment in its own reach. The model
-     * doesn't change while an event is handled, and the memo is dropped when
-     * the handling ends. A call inside another shares its memo.
-     */
-    private _withMarkMemo<T>(handle: () => T): T {
-        if (this._markMemo !== null) return handle();
-        this._markMemo = new Map();
-        try {
-            return handle();
-        } finally {
-            this._markMemo = null;
-        }
-    }
-
-    /**
      * The decks and gaps that the tracks crossing `segment` put on it, and the
      * segments that cross it, level crossings included, since a change to
-     * either can turn a crossing into a bridge. It records nothing. The marks
-     * are memoised during an event; the partners are a set of the caller's own.
+     * either can turn a crossing into a bridge. They are found once and kept
+     * across events in `_markCache`, until a change that can alter them drops
+     * them, so the result is shared: don't change it.
      */
     private _crossingMarksOf(
         curveNumber: number,
         segment: TrackSegmentWithCollision
     ): CrossingMarks {
-        const known = this._markMemo?.get(curveNumber);
-        const found = known ?? this._findCrossingMarks(curveNumber, segment);
-        if (known === undefined) this._markMemo?.set(curveNumber, found);
-        return { marks: found.marks, partners: new Set(found.partners) };
+        const known = this._markCache.get(curveNumber);
+        if (known !== undefined) return known;
+        const found = this._findCrossingMarks(curveNumber, segment);
+        this._markCache.set(curveNumber, found);
+        return found;
+    }
+
+    /**
+     * Drops the cached marks that a change to `curveNumber` itself can alter:
+     * its own, those of `partners`, and those of every segment whose marks
+     * were found with it as a partner, which `partners` can miss when only one
+     * of the two segments reported the crossing.
+     */
+    private _dropMarksOf(
+        curveNumber: number,
+        partners: Iterable<number>
+    ): void {
+        this._markCache.delete(curveNumber);
+        for (const partner of partners) this._markCache.delete(partner);
+        for (const [number, cached] of this._markCache) {
+            if (cached.partners.has(curveNumber)) {
+                this._markCache.delete(number);
+            }
+        }
+    }
+
+    /**
+     * Drops the cached marks of every segment whose box overlaps `box`, other
+     * than `except`: the segments whose crossings a segment there can change
+     * by being added or removed. Its own crossings name only some of them,
+     * since a crossing is found approximately and can be reported by one of
+     * the two segments only. A segment with no record has no box, and is
+     * dropped too.
+     */
+    private _dropMarksNear(box: Box, except?: number): void {
+        for (const number of this._markCache.keys()) {
+            if (number === except) continue;
+            const theirs = this._lineTracks.get(number)?.box;
+            if (theirs === undefined || boxesOverlap(theirs, box)) {
+                this._markCache.delete(number);
+            }
+        }
+    }
+
+    /**
+     * Whether `curveNumber` is drawn with another preset than the one it has
+     * in the model now. Of a segment's style, only the preset changes its
+     * marks or other segments' marks, portals and wings (`crossingMark` and
+     * `needsRunEndMark` read nothing else of it). False when it isn't drawn.
+     */
+    private _presetChanged(curveNumber: number): boolean {
+        const drawn = this._lineTracks.get(curveNumber);
+        if (drawn === undefined) return false;
+        const segment =
+            this._trackCurveManager.getTrackSegmentWithJoints(curveNumber);
+        return drawn.input.lineStyle?.preset !== segment?.lineStyle?.preset;
     }
 
     /** {@link _crossingMarksOf}, found from the model. */
@@ -950,7 +1010,7 @@ export class TrackRenderSystem {
         ends: LineTrackRecord['ends']
     ): MarkSpan[] {
         const { marks, partners } = this._crossingMarksOf(curveNumber, segment);
-        this._linePartners.set(curveNumber, partners);
+        this._linePartners.set(curveNumber, new Set(partners));
         for (const partner of partners) {
             const theirs = this._linePartners.get(partner) ?? new Set<number>();
             theirs.add(curveNumber);
@@ -1254,6 +1314,7 @@ export class TrackRenderSystem {
             styled: drawing.styled,
             strokeZoom: zoom,
             ends,
+            box: drawn?.box ?? segment.curve.AABB,
         });
         if (drawn !== undefined) return;
 
@@ -1446,6 +1507,7 @@ export class TrackRenderSystem {
         this._simplifiedTrackGraphicsMap.clear();
         this._lineTracks.clear();
         this._linePartners.clear();
+        this._markCache.clear();
 
         this._undergroundIndicatorMap.forEach(entry => {
             const removed = this._worldRenderSystem.removeFromBand(
@@ -2648,16 +2710,21 @@ export class TrackRenderSystem {
     }
 
     /**
-     * Drops a removed line-style segment's record and partner links, then
-     * redraws what it was crossing, which loses its deck or gap, the `tunnel`
-     * and `bridge` segments at its ends, whose run ends may change, and the
-     * segments in reach of it and of what it crossed, which lose what carried
-     * across. The model no longer has the segment, so only what was recorded
-     * about it is used.
+     * Drops a removed line-style segment's record, partner links and cached
+     * marks, and the cached marks of the segments it crossed or was near,
+     * then redraws what it was crossing, which loses its deck or gap, the
+     * `tunnel` and `bridge` segments at its ends, whose run ends may change,
+     * and the segments in reach of it and of what it crossed, which lose what
+     * carried across. The model no longer has the segment, so only what was
+     * recorded about it is used.
      */
     private _forgetLineSegment(curveNumber: number): void {
         const record = this._lineTracks.get(curveNumber);
         const partners = [...(this._linePartners.get(curveNumber) ?? [])];
+        this._dropMarksOf(curveNumber, partners);
+        // With no record there is no box to look near; dropping all is safe.
+        if (record === undefined) this._markCache.clear();
+        else this._dropMarksNear(record.box);
         this._lineTracks.delete(curveNumber);
         this._linePartners.delete(curveNumber);
         for (const partner of partners) {
@@ -2677,7 +2744,7 @@ export class TrackRenderSystem {
             removed?.destroy({ children: true });
             this._simplifiedTrackGraphicsMap.delete(curveNumber);
         }
-        this._withMarkMemo(() => this._forgetLineSegment(curveNumber));
+        this._forgetLineSegment(curveNumber);
 
         const ugEntry = this._undergroundIndicatorMap.get(curveNumber);
         if (ugEntry !== undefined) {
@@ -2694,10 +2761,18 @@ export class TrackRenderSystem {
         trackSegment: TrackSegmentWithCollision
     ) {
         if (this._renderStyle !== 'detailed') {
-            this._withMarkMemo(() => {
-                this._drawLineSegment(curveNumber, trackSegment);
-                this._redrawLineNeighboursOf(curveNumber);
-            });
+            // Drop the cached marks the new segment can change: those of the
+            // segments it crosses, and, since a crossing can be reported by
+            // one of its segments only, those of every segment near it.
+            this._markCache.delete(curveNumber);
+            const { partners } = this._crossingMarksOf(
+                curveNumber,
+                trackSegment
+            );
+            for (const partner of partners) this._markCache.delete(partner);
+            this._dropMarksNear(trackSegment.curve.AABB, curveNumber);
+            this._drawLineSegment(curveNumber, trackSegment);
+            this._redrawLineNeighboursOf(curveNumber);
             return;
         }
 

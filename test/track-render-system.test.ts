@@ -1620,44 +1620,172 @@ describe('TrackRenderSystem: marks across joints', () => {
         expectSpans(xSpans(linesOf(host, n)), [[-20, -(overflow - shortWay)]]);
     });
 
-    it('finds the crossings of each segment once per event', () => {
+    it('finds the crossings of a segment at most once per event, and keeps them for the next', () => {
         const { graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
         const { joints, segments } = layTrack(
             graph,
             [0, 10, 20, 30, 40, 50, 60].map(x => ({ x, y: 0 }))
         );
-        layLine(graph, { x: 25, y: -20 }, { x: 25, y: 20 }, ELEVATION.ABOVE_1);
+        const upper = layLine(
+            graph,
+            { x: 25, y: -20 },
+            { x: 25, y: 20 },
+            ELEVATION.ABOVE_1
+        );
         const crossings = spyOn(graph.trackCurveManager, 'getCrossings');
+        /** The segments `event` looks up, in order; none of them twice. */
         const askedBy = (event: () => void): number[] => {
             crossings.mockClear();
             event();
-            return crossings.mock.calls.map(([segment]) => segment);
-        };
-        const expectOnce = (asked: number[]) => {
-            expect(asked.length).toBeGreaterThan(0);
+            const asked = crossings.mock.calls.map(([segment]) => segment);
             expect(new Set(asked).size).toBe(asked.length);
+            return asked.sort((a, b) => a - b);
         };
+        const living = () =>
+            [...graph.trackCurveManager.livingEntities].sort((a, b) => a - b);
 
-        expectOnce(
-            askedBy(() => {
-                const next = graph.createNewEmptyJoint(
-                    { x: 70, y: 0 },
-                    { x: 1, y: 0 }
-                );
-                graph.connectJoints(joints[6]!, next, [{ x: 65, y: 0 }]);
-            })
-        );
-        expectOnce(
+        let next = -1;
+        const added = askedBy(() => {
+            const end = graph.createNewEmptyJoint(
+                { x: 70, y: 0 },
+                { x: 1, y: 0 }
+            );
+            graph.connectJoints(joints[6]!, end, [{ x: 65, y: 0 }]);
+            next = graph.getJoint(joints[6]!)!.connections.get(end)!;
+        });
+        expect(added).toContain(next);
+        expect(added).not.toContain(upper);
+        expect(added).not.toContain(segments[2]!);
+
+        let far = -1;
+        expect(
+            askedBy(
+                () => (far = layLine(graph, { x: 500, y: 0 }, { x: 600, y: 0 }))
+            )
+        ).toEqual([far]);
+        expect(
+            askedBy(() =>
+                graph.setSegmentStyle(segments[3]!, {
+                    lineStyle: { color: 0x2266cc },
+                })
+            )
+        ).toEqual([]);
+        expect(
             askedBy(() =>
                 graph.setSegmentStyle(segments[3]!, {
                     lineStyle: { preset: 'bridge' },
                 })
             )
+        ).toEqual([segments[3]!]);
+        const removed = askedBy(() => graph.removeTrackSegment(segments[4]!));
+        expect(removed).not.toContain(upper);
+        expect(removed).not.toContain(segments[2]!);
+
+        expect(askedBy(() => (renderer.renderStyle = 'rails'))).toEqual(
+            living()
         );
-        expectOnce(askedBy(() => graph.removeTrackSegment(segments[4]!)));
-        expectOnce(askedBy(() => (renderer.renderStyle = 'rails')));
-        expectOnce(askedBy(() => (renderer.bridgeGapClearance = 3)));
+        expect(askedBy(() => (renderer.bridgeGapClearance = 3))).toEqual(
+            living()
+        );
+    });
+
+    it('finds a crossing that only the crossed segment reports when it is drawn again', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const manager = graph.trackCurveManager;
+        const h = layLine(graph, A, B);
+        // Crossings are found approximately, so one can be missed from one
+        // side: here no segment but h reports any. Adding or removing v then
+        // doesn't redraw h, so a style change draws it again.
+        const real = manager.getCrossings.bind(manager);
+        const crossings = spyOn(manager, 'getCrossings').mockImplementation(
+            n => (n === h ? real(n) : [])
+        );
+        const redrawH = (color: number) =>
+            graph.setSegmentStyle(h, { lineStyle: { color } });
+        try {
+            const v = layLine(
+                graph,
+                { x: 50, y: -50 },
+                { x: 50, y: 50 },
+                ELEVATION.ABOVE_1
+            );
+
+            redrawH(0x2266cc);
+            expectSpans(xSpans(linesOf(host, h)), [
+                [0, 50 - GAP],
+                [50 + GAP, 100],
+            ]);
+
+            graph.removeTrackSegment(v);
+            redrawH(0xcc2266);
+            expectSpans(xSpans(linesOf(host, h)), [[0, 100]]);
+        } finally {
+            crossings.mockRestore();
+        }
+    });
+
+    it('finds the marks again when a crossing track stops or starts being a tunnel', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = layCrossing(graph);
+
+        graph.setSegmentStyle(v, { lineStyle: { preset: 'tunnel' } });
+        expectSpans(xSpans(linesOf(host, h)), [[0, 100]]);
+
+        graph.setSegmentStyle(v, { lineStyle: undefined });
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - GAP],
+            [50 + GAP, 100],
+        ]);
+    });
+
+    it('finds its own marks again when a track becomes a bridge and stops being one', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { v } = layCrossing(graph);
+        const decked = linesOf(host, v);
+        const bridge = { lineStyle: { preset: 'bridge' as const } };
+        const alone = scene();
+        alone.renderer.renderStyle = 'centerline';
+        const same = layLine(
+            alone.graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        alone.graph.setSegmentStyle(same, bridge);
+
+        graph.setSegmentStyle(v, bridge);
+        expect(linesOf(host, v)).toEqual(linesOf(alone.host, same));
+
+        graph.setSegmentStyle(v, { lineStyle: undefined });
+        expect(linesOf(host, v)).toEqual(decked);
+    });
+
+    it('finds the marks again for the new style after a render-style switch', () => {
+        const angle = Math.PI / 4;
+        const layAt45 = (graph: TrackGraph) => {
+            const h = layLine(graph, A, B);
+            layLine(
+                graph,
+                { x: 50 - 50 * Math.cos(angle), y: -50 * Math.sin(angle) },
+                { x: 50 + 50 * Math.cos(angle), y: 50 * Math.sin(angle) },
+                ELEVATION.ABOVE_1
+            );
+            return h;
+        };
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const h = layAt45(graph);
+        const inRails = scene();
+        inRails.renderer.renderStyle = 'rails';
+        const same = layAt45(inRails.graph);
+
+        renderer.renderStyle = 'rails';
+
+        expect(linesOf(host, h)).toEqual(linesOf(inRails.host, same));
     });
 
     it('cuts both segments once at a crossing on the joint', () => {
