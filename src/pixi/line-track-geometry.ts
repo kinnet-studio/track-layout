@@ -519,30 +519,50 @@ function portalStroke(
     };
 }
 
-/** The gap marks as arc-length intervals clamped to the segment, sorted and merged. */
-function gapIntervals(
+/**
+ * The marks of one kind as arc-length spans [from, to], sorted, with spans that
+ * overlap or touch merged into one. The ends are the marks' own: they may lie
+ * outside the segment, and the caller clamps them.
+ */
+function mergedSpans(
     marks: CrossingMark[],
-    length: number
+    kind: CrossingMark['kind']
 ): [number, number][] {
-    const gaps = marks
-        .filter(mark => mark.kind === 'gap')
+    const spans = marks
+        .filter(mark => mark.kind === kind)
         .map((mark): [number, number] => [
-            Math.max(0, mark.s - mark.halfLength),
-            Math.min(length, mark.s + mark.halfLength),
+            mark.s - mark.halfLength,
+            mark.s + mark.halfLength,
         ])
-        .filter(([from, to]) => to - from > EMPTY_INTERVAL)
         .sort((a, b) => a[0] - b[0]);
     const merged: [number, number][] = [];
-    for (const gap of gaps) {
+    for (const span of spans) {
         const last = merged[merged.length - 1];
-        if (last !== undefined && gap[0] <= last[1]) {
-            last[1] = Math.max(last[1], gap[1]);
+        if (last !== undefined && span[0] <= last[1]) {
+            last[1] = Math.max(last[1], span[1]);
         } else {
-            merged.push([gap[0], gap[1]]);
+            merged.push([span[0], span[1]]);
         }
     }
     return merged;
 }
+
+/** The gap marks as merged arc-length intervals clamped to the segment. */
+function gapIntervals(
+    marks: CrossingMark[],
+    length: number
+): [number, number][] {
+    return mergedSpans(marks, 'gap')
+        .map((span): [number, number] => [
+            Math.max(0, span[0]),
+            Math.min(length, span[1]),
+        ])
+        .filter(([from, to]) => to - from > EMPTY_INTERVAL);
+}
+
+/** Whether arc length `s` lies in one of the (clamped) `intervals`. */
+const covers = (intervals: [number, number][], s: number): boolean =>
+    intervals.some(([from, to]) => from <= s && s <= to);
 
 /** What is left of [`s0`, `s1`] once `gaps` (sorted and disjoint) are cut out. */
 function subtractGaps(
@@ -562,13 +582,49 @@ function subtractGaps(
     return pieces;
 }
 
+/** A parapet from `from` to `to` at `offset`, with a wing at each end asked for. */
+function parapetStroke(
+    samples: LineSample[],
+    from: number,
+    to: number,
+    offset: number,
+    wings: { start: boolean; end: boolean },
+    color: number
+): LineStroke {
+    const points = polylineBetween(samples, from, to, offset);
+    if (wings.start) {
+        points.unshift(wingTip(frameAt(samples, from), offset, -1));
+    }
+    if (wings.end) {
+        points.push(wingTip(frameAt(samples, to), offset, 1));
+    }
+    return { points, color };
+}
+
+/** A wing on its own, from the line at `offset` out to its tip, at arc length `s`. */
+function wingStroke(
+    samples: LineSample[],
+    s: number,
+    offset: number,
+    direction: 1 | -1,
+    color: number
+): LineStroke {
+    const frame = frameAt(samples, s);
+    return {
+        points: [offsetPoint(frame, offset), wingTip(frame, offset, direction)],
+        color,
+    };
+}
+
 /**
  * The strokes for one segment: its line (one per rail for `rails`) split into
  * above- and below-ground runs, each cut by its pattern and by the gaps under
  * any decks; a portal wherever the track meets the ground; the parapets of a
- * `bridge` preset and of the decks over other tracks; and the portals of a
- * `tunnel` preset's run ends. Marks are solid, and take the colour of the run
- * they sit on, except that portals always take the above-ground colour.
+ * `bridge` preset and of the decks over other tracks (decks that overlap are
+ * one); and the portals of a `tunnel` preset's run ends. Marks are solid, and
+ * take the colour of the run they sit on, except that portals always take the
+ * above-ground colour. Gaps cut lines and parapets, never wings or portals: a
+ * wing at a run end that a gap has taken from its parapet is drawn on its own.
  */
 export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
     const { samples, gauge, renderStyle, metresPerPixel } = input;
@@ -588,8 +644,12 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
         run.underground
             ? lightenColor(style.color, UNDERGROUND_LIGHTEN)
             : style.color;
+    const parts = runs.map(run => ({
+        run,
+        pieces: subtractGaps(run.s0, run.s1, gaps),
+    }));
 
-    for (const run of runs) {
+    for (const { run, pieces } of parts) {
         const pattern =
             run.underground && style.pattern === 'solid'
                 ? 'dashed'
@@ -600,7 +660,7 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
         );
         // A run too short to show a dash now may show one at another zoom.
         if (run.s1 > run.s0 && lengths.length > 0) styled = true;
-        for (const [pieceFrom, pieceTo] of subtractGaps(run.s0, run.s1, gaps)) {
+        for (const [pieceFrom, pieceTo] of pieces) {
             const intervals = patternIntervals(pieceFrom, pieceTo, lengths);
             for (const offset of offsets) {
                 for (const [from, to] of intervals) {
@@ -618,44 +678,55 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
     }
 
     if (style.preset === 'bridge') {
-        for (const run of runs) {
-            const color = colorOf(run);
-            for (const [from, to] of subtractGaps(run.s0, run.s1, gaps)) {
-                for (const offset of parapets) {
-                    const points = polylineBetween(samples, from, to, offset);
-                    if (runEnds.start && from === 0) {
-                        points.unshift(
-                            wingTip(frameAt(samples, 0), offset, -1)
-                        );
-                    }
-                    if (runEnds.end && to === length) {
-                        points.push(
-                            wingTip(frameAt(samples, length), offset, 1)
-                        );
-                    }
-                    strokes.push({ points, color });
-                }
+        const parapetPieces = parts.flatMap(({ run, pieces }) =>
+            pieces.map(([from, to]) => ({ from, to, color: colorOf(run) }))
+        );
+        const startCut = covers(gaps, 0);
+        const endCut = covers(gaps, length);
+        parapetPieces.forEach(({ from, to, color }, i) => {
+            const wings = {
+                start: runEnds.start && !startCut && i === 0,
+                end: runEnds.end && !endCut && i === parapetPieces.length - 1,
+            };
+            for (const offset of parapets) {
+                strokes.push(
+                    parapetStroke(samples, from, to, offset, wings, color)
+                );
+            }
+        });
+        // A gap over a run end takes the parapet there but not the wing.
+        for (const offset of parapets) {
+            if (runEnds.start && startCut) {
+                strokes.push(
+                    wingStroke(samples, 0, offset, -1, colorOf(runs[0]!))
+                );
+            }
+            if (runEnds.end && endCut) {
+                strokes.push(
+                    wingStroke(
+                        samples,
+                        length,
+                        offset,
+                        1,
+                        colorOf(runs[runs.length - 1]!)
+                    )
+                );
             }
         }
     }
 
-    for (const mark of marks) {
-        if (mark.kind !== 'deck') continue;
-        const from = Math.max(0, mark.s - mark.halfLength);
-        const to = Math.min(length, mark.s + mark.halfLength);
+    for (const [rawFrom, rawTo] of mergedSpans(marks, 'deck')) {
+        const from = Math.max(0, rawFrom);
+        const to = Math.min(length, rawTo);
         if (!(to - from > EMPTY_INTERVAL)) continue;
-        const run = runs.find(r => mark.s <= r.s1) ?? runs[runs.length - 1]!;
-        const color = colorOf(run);
+        const centre = (rawFrom + rawTo) / 2;
+        const run = runs.find(r => centre <= r.s1) ?? runs[runs.length - 1]!;
+        // A clamped end stops at the segment's own end, with no wing.
+        const wings = { start: rawFrom > 0, end: rawTo < length };
         for (const offset of parapets) {
-            const points = polylineBetween(samples, from, to, offset);
-            // A clamped end stops at the segment's own end, with no wing.
-            if (from > 0) {
-                points.unshift(wingTip(frameAt(samples, from), offset, -1));
-            }
-            if (to < length) {
-                points.push(wingTip(frameAt(samples, to), offset, 1));
-            }
-            strokes.push({ points, color });
+            strokes.push(
+                parapetStroke(samples, from, to, offset, wings, colorOf(run))
+            );
         }
     }
 

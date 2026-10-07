@@ -187,6 +187,7 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
 - `L_deck = (g_lower / 2 + DECK_CLEARANCE) / sin θ + P · |cot θ|`, capped at `MAX_MARK_HALF_LENGTH`.
 - Each parapet end has a `MARK_LENGTH` wing, bent `MARK_ANGLE` outward: away from the centreline, and on along the track away from the deck. This is the `╲___╱` shape.
 - A `bridge`-preset segment draws no crossing deck; its full-length parapets already cover the crossing.
+- Decks that overlap or touch on one segment merge into one, with wings only at its outer ends.
 
 **Gap** (on the `under` segment):
 

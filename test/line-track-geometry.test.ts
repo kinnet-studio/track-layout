@@ -491,6 +491,32 @@ describe('crossingMark', () => {
         }
     });
 
+    it('takes each size from the right side when the gauges differ', () => {
+        // A deck clears the lower track's gauge and spans its own parapets;
+        // a gap clears the upper track's parapets and spans its own rails.
+        const deck = crossingMark(
+            side(at(30), 10, { gauge: 1.435 }),
+            side(STRAIGHT, 0, { gauge: 1.067 }),
+            null,
+            'centerline'
+        );
+        expect(deck!.halfLength).toBeCloseTo(
+            (1.067 / 2 + 1.5) / 0.5 + (1.435 / 2 + 1.5) * Math.sqrt(3),
+            6
+        );
+
+        const gap = crossingMark(
+            side(STRAIGHT, 0, { gauge: 1.067 }),
+            side(at(30), 10, { gauge: 1.435 }),
+            null,
+            'rails'
+        );
+        expect(gap!.halfLength).toBeCloseTo(
+            (1.435 / 2 + 1.5 + 0.5) / 0.5 + (1.067 / 2) * Math.sqrt(3),
+            6
+        );
+    });
+
     it("leaves level and buried crossings, and a bridge preset's deck, unmarked", () => {
         expect(
             crossingMark(side(V, 2), side(STRAIGHT, 0), null, 'centerline')
@@ -531,6 +557,8 @@ describe('needsRunEndMark', () => {
                 { lineStyle: undefined, underground: false },
             ])
         ).toBe(true);
+
+        expect(needsRunEndMark(bridge, false, [])).toBe(true);
 
         expect(needsRunEndMark(tunnel, true, [])).toBe(false);
         expect(needsRunEndMark(tunnel, false, [{ underground: true }])).toBe(
@@ -735,6 +763,154 @@ describe('buildLineTrack marks', () => {
             expectPoint(own[0]!.points.at(-1), 47.5, sign * P);
             expectPoint(own[1]!.points[0], 52.5, sign * P);
             expectPoint(own[1]!.points.at(-1), 100 + W, sign * (P + W));
+        }
+    });
+
+    it("keeps a bridge preset's wings where a gap takes the end of its parapets", () => {
+        const drawing = buildLineTrack(
+            input({
+                lineStyle: { preset: 'bridge' },
+                runEnds: { start: true, end: true },
+                marks: [{ kind: 'gap', s: 1, halfLength: 3 }],
+            })
+        );
+        // The gap, [0, 4], cuts the start of each parapet and its wing's root.
+        // The wing is drawn alone; the end wing is still part of its parapet.
+        const strokes = parapets(drawing.strokes);
+        const wings = strokes.filter(s => s.points.length === 2);
+        const rails = strokes.filter(s => s.points.length > 2);
+        expect(wings).toHaveLength(2);
+        expect(rails).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const wing = wings.find(s => Math.sign(s.points[0]!.y) === sign)!;
+            expect(wing.color).toBe(BLACK);
+            expectPoint(wing.points[0], 0, sign * P);
+            expectPoint(wing.points[1], -W, sign * (P + W));
+
+            const rail = rails.find(s => Math.sign(s.points[0]!.y) === sign)!;
+            expectPoint(rail.points[0], 4, sign * P);
+            expectPoint(rail.points.at(-2), 100, sign * P);
+            expectPoint(rail.points.at(-1), 100 + W, sign * (P + W));
+        }
+
+        const far = buildLineTrack(
+            input({
+                lineStyle: { preset: 'bridge' },
+                runEnds: { start: true, end: true },
+                marks: [{ kind: 'gap', s: 99, halfLength: 3 }],
+            })
+        );
+        const farWings = parapets(far.strokes).filter(
+            s => s.points.length === 2
+        );
+        expect(farWings).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const wing = farWings.find(
+                s => Math.sign(s.points[0]!.y) === sign
+            )!;
+            expectPoint(wing.points[0], 100, sign * P);
+            expectPoint(wing.points[1], 100 + W, sign * (P + W));
+            const rail = parapets(far.strokes).find(
+                s => s.points.length > 2 && Math.sign(s.points[1]!.y) === sign
+            )!;
+            expectPoint(rail.points[0], -W, sign * (P + W));
+            expectPoint(rail.points.at(-1), 96, sign * P);
+        }
+
+        // Only the ends asked for get a wing.
+        const none = buildLineTrack(
+            input({
+                lineStyle: { preset: 'bridge' },
+                runEnds: { start: false, end: false },
+                marks: [{ kind: 'gap', s: 1, halfLength: 3 }],
+            })
+        );
+        expect(parapets(none.strokes).every(s => s.points.length > 2)).toBe(
+            true
+        );
+    });
+
+    it('draws a gap over a whole segment as wings alone', () => {
+        const drawing = buildLineTrack(
+            input({
+                lineStyle: { preset: 'bridge' },
+                runEnds: { start: true, end: true },
+                marks: [{ kind: 'gap', s: 50, halfLength: 60 }],
+            })
+        );
+        expect(drawing.strokes).toHaveLength(4);
+        expect(drawing.strokes.every(s => s.points.length === 2)).toBe(true);
+    });
+
+    it('merges decks that overlap into one, with wings at its outer ends', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    { kind: 'deck', s: 52, halfLength: 2.2 },
+                    { kind: 'deck', s: 48, halfLength: 2.2 },
+                ],
+            })
+        );
+        const rails = parapets(drawing.strokes);
+        expect(rails).toHaveLength(2);
+        expect(drawing.strokes).toHaveLength(3);
+        for (const sign of [-1, 1]) {
+            const rail = rails.find(s => Math.sign(s.points[1]!.y) === sign)!;
+            expectPoint(rail.points[0], 45.8 - W, sign * (P + W));
+            expectPoint(rail.points[1], 45.8, sign * P);
+            expectPoint(rail.points.at(-2), 54.2, sign * P);
+            expectPoint(rail.points.at(-1), 54.2 + W, sign * (P + W));
+        }
+        expectSpans(xSpans(rails), [
+            [45.8 - W, 54.2 + W],
+            [45.8 - W, 54.2 + W],
+        ]);
+    });
+
+    it('keeps decks that are apart separate, and merges touching ones', () => {
+        const apart = buildLineTrack(
+            input({
+                marks: [
+                    { kind: 'deck', s: 30, halfLength: 3 },
+                    { kind: 'deck', s: 60, halfLength: 3 },
+                ],
+            })
+        );
+        expect(parapets(apart.strokes)).toHaveLength(4);
+
+        const touching = buildLineTrack(
+            input({
+                marks: [
+                    { kind: 'deck', s: 47, halfLength: 3 },
+                    { kind: 'deck', s: 53, halfLength: 3 },
+                ],
+            })
+        );
+        const rails = parapets(touching.strokes);
+        expect(rails).toHaveLength(2);
+        expectPoint(rails[0]!.points[0], 44 - W, rails[0]!.points[0]!.y);
+        expectPoint(
+            rails[0]!.points.at(-1),
+            56 + W,
+            rails[0]!.points.at(-1)!.y
+        );
+    });
+
+    it('merges decks only up to the segment end, with no wing there', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    { kind: 'deck', s: 1, halfLength: 3 },
+                    { kind: 'deck', s: 5, halfLength: 3 },
+                ],
+            })
+        );
+        const rails = parapets(drawing.strokes);
+        expect(rails).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const rail = rails.find(s => Math.sign(s.points[0]!.y) === sign)!;
+            expectPoint(rail.points[0], 0, sign * P);
+            expectPoint(rail.points.at(-1), 8 + W, sign * (P + W));
         }
     });
 
