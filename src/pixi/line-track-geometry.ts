@@ -33,6 +33,19 @@ export const DECK_CLEARANCE = 1.5;
 export const GAP_CLEARANCE = 0.5;
 
 /**
+ * The most space (metres) between the inner parapets of two decks side by side
+ * over the same track for them to be drawn as one bridge.
+ */
+export const SHARED_BRIDGE_SPACE = 2;
+
+/**
+ * Two tracks whose crossings of the same lower track are closer than this
+ * (metres) meet over it, at a junction or a crossing on the bridge. Which side
+ * of each faces the other isn't defined there, so they keep their own decks.
+ */
+export const SHARED_BRIDGE_MIN_APART = 0.5;
+
+/**
  * A crossing mark never reaches further than this (metres) from its track, so
  * it is also how far the renderer walks along the joints to carry a mark onto
  * the next segments, and the most `bridgeGapClearance` can be.
@@ -326,6 +339,67 @@ export function crossingMark(
         s: self.curve.lengthAtT(self.t),
         halfLength: Math.min(halfLength, MAX_MARK_HALF_LENGTH),
     };
+}
+
+/** A track that crosses over a lower segment with a deck, as the lower segment sees it. */
+export type OverCrossing = {
+    /** The upper segment. */
+    segment: number;
+    /** Where it crosses the lower segment. */
+    point: Point;
+    /** Arc length of the crossing along the lower segment. */
+    s: number;
+    /** The upper track's unit normal at the crossing: its tangent turned a quarter turn toward +y. */
+    normal: Point;
+    gauge: number;
+    /** The upper track's height at the crossing, in metres. */
+    height: number;
+};
+
+/**
+ * Two neighbouring decks over one lower segment that make one bridge: each
+ * with the side of its own normal (+1 or −1) that faces the other.
+ */
+export type SharedBridgePair = {
+    a: { segment: number; s: number; side: 1 | -1 };
+    b: { segment: number; s: number; side: 1 | -1 };
+};
+
+/**
+ * The pairs of decks over one lower segment that share a bridge. Only
+ * neighbours along the lower segment are compared, so in a run of three the
+ * middle one pairs with each outer one. Two neighbours share when they are
+ * within {@link VERTICAL_CLEARANCE} of each other's height, their crossings are
+ * at least {@link SHARED_BRIDGE_MIN_APART} apart, and the space between their
+ * parapets is at most {@link SHARED_BRIDGE_SPACE}. That space is measured
+ * across each track and the smaller taken, so the answer is the same from
+ * either track, and diverging tracks are judged where they are closest.
+ */
+export function sharedBridgePairs(
+    over: readonly OverCrossing[]
+): SharedBridgePair[] {
+    const sorted = [...over].sort((a, b) => a.s - b.s || a.segment - b.segment);
+    const pairs: SharedBridgePair[] = [];
+    for (let i = 0; i + 1 < sorted.length; i++) {
+        const a = sorted[i]!;
+        const b = sorted[i + 1]!;
+        if (Math.abs(a.height - b.height) >= VERTICAL_CLEARANCE) continue;
+        const delta = PointCal.subVector(b.point, a.point);
+        if (PointCal.magnitude(delta) < SHARED_BRIDGE_MIN_APART) continue;
+        const acrossA = PointCal.dotProduct(delta, a.normal);
+        const acrossB = PointCal.dotProduct(delta, b.normal);
+        const spacing = Math.min(Math.abs(acrossA), Math.abs(acrossB));
+        const limit =
+            parapetOffset(a.gauge) +
+            parapetOffset(b.gauge) +
+            SHARED_BRIDGE_SPACE;
+        if (spacing > limit) continue;
+        pairs.push({
+            a: { segment: a.segment, s: a.s, side: acrossA >= 0 ? 1 : -1 },
+            b: { segment: b.segment, s: b.s, side: -acrossB >= 0 ? 1 : -1 },
+        });
+    }
+    return pairs;
 }
 
 /**

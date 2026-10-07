@@ -6,6 +6,7 @@ import {
     type CrossingSide,
     type LineStroke,
     type LineTrackInput,
+    type OverCrossing,
     buildLineTrack,
     carrySpan,
     classifyCrossing,
@@ -16,6 +17,7 @@ import {
     patternIntervals,
     resolveLineStyle,
     sampleLine,
+    sharedBridgePairs,
 } from '../src/pixi/line-track-geometry.js';
 
 const STRAIGHT = new BCurve([
@@ -1179,5 +1181,111 @@ describe('patternIntervals', () => {
         expect(intervals[0]![0]).toBeCloseTo(0, 9);
         expect(intervals[0]![1]).toBeCloseTo(0.15, 9);
         expect(intervals[intervals.length - 1]![1]).toBeLessThanOrEqual(1000);
+    });
+});
+
+describe('sharedBridgePairs', () => {
+    /** A track laid toward +y crossing the x axis at `x`, one level up, at gauge 1.435. */
+    const over = (
+        segment: number,
+        x: number,
+        o: Partial<OverCrossing> = {}
+    ): OverCrossing => ({
+        segment,
+        point: { x, y: 0 },
+        s: x,
+        normal: { x: -1, y: 0 },
+        gauge: 1.435,
+        height: 10,
+        ...o,
+    });
+
+    it('pairs two tracks 4 m apart at one level, each facing the other', () => {
+        expect(sharedBridgePairs([over(0, 48), over(1, 52)])).toEqual([
+            {
+                a: { segment: 0, s: 48, side: -1 },
+                b: { segment: 1, s: 52, side: 1 },
+            },
+        ]);
+    });
+
+    it('pairs up to 2 m between the parapets', () => {
+        // P = 1.435 / 2 + 1.5, so the limit is 2P + 2, about 6.435 m.
+        expect(sharedBridgePairs([over(0, 50), over(1, 56.4)])).toHaveLength(1);
+        expect(sharedBridgePairs([over(0, 50), over(1, 56.5)])).toEqual([]);
+    });
+
+    it('pairs tracks within 3 m of height', () => {
+        expect(
+            sharedBridgePairs([over(0, 48), over(1, 52, { height: 12.9 })])
+        ).toHaveLength(1);
+        expect(
+            sharedBridgePairs([over(0, 48), over(1, 52, { height: 13 })])
+        ).toEqual([]);
+    });
+
+    it('pairs only neighbours, so the middle of three faces both ways', () => {
+        expect(
+            sharedBridgePairs([over(0, 46), over(1, 50), over(2, 54)])
+        ).toEqual([
+            {
+                a: { segment: 0, s: 46, side: -1 },
+                b: { segment: 1, s: 50, side: 1 },
+            },
+            {
+                a: { segment: 1, s: 50, side: -1 },
+                b: { segment: 2, s: 54, side: 1 },
+            },
+        ]);
+    });
+
+    it('gives the same pairs whatever the input order', () => {
+        expect(
+            sharedBridgePairs([over(2, 54), over(0, 46), over(1, 50)])
+        ).toEqual(sharedBridgePairs([over(0, 46), over(1, 50), over(2, 54)]));
+    });
+
+    it('judges diverging tracks by where they are closest, from either side', () => {
+        // At gauge 1.067 the limit is about 6.067 m: 6.2 m across the
+        // straight track, but about 5.83 m across the tilted one.
+        const r = (20 * Math.PI) / 180;
+        const tilted = { x: -Math.cos(r), y: Math.sin(r) };
+        expect(
+            sharedBridgePairs([
+                over(0, 50, { gauge: 1.067 }),
+                over(1, 56.2, { gauge: 1.067, normal: tilted }),
+            ])
+        ).toHaveLength(1);
+        expect(
+            sharedBridgePairs([
+                over(0, 50, { gauge: 1.067, normal: tilted }),
+                over(1, 56.2, { gauge: 1.067 }),
+            ])
+        ).toHaveLength(1);
+    });
+
+    it('faces each other when laid in opposite directions', () => {
+        const pairs = sharedBridgePairs([
+            over(0, 48),
+            over(1, 52, { normal: { x: 1, y: 0 } }),
+        ]);
+
+        expect(pairs).toHaveLength(1);
+        expect(pairs[0]!.a.side).toBe(-1);
+        expect(pairs[0]!.b.side).toBe(-1);
+    });
+
+    it("uses each track's own parapet offset", () => {
+        // 2.0335 + 2.2175 + 2 = 6.251 m.
+        expect(
+            sharedBridgePairs([over(0, 50, { gauge: 1.067 }), over(1, 56.2)])
+        ).toHaveLength(1);
+        expect(
+            sharedBridgePairs([over(0, 50, { gauge: 1.067 }), over(1, 56.3)])
+        ).toEqual([]);
+    });
+
+    it('does not pair crossings under 0.5 m apart', () => {
+        expect(sharedBridgePairs([over(0, 50), over(1, 50.4)])).toEqual([]);
     });
 });
