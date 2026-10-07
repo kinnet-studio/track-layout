@@ -103,6 +103,9 @@ type LineTrackRecord = {
     ends: { joint: number; position: Point }[];
 };
 
+/** What a segment's crossings put on it, and who crosses it. */
+type CrossingMarks = { marks: CrossingMark[]; partners: Set<number> };
+
 /** Whether a segment's ends can get a portal or wings, which depend on what meets them. */
 const hasRunEnds = (lineStyle: TrackLineStyle | undefined): boolean =>
     lineStyle?.preset === 'tunnel' || lineStyle?.preset === 'bridge';
@@ -333,6 +336,13 @@ export class TrackRenderSystem {
      */
     private _linePartners: Map<number, Set<number>> = new Map();
 
+    /**
+     * The crossings of each segment, found once while a model event is handled
+     * (see {@link _withMarkMemo}). Null outside one, so nothing carries over
+     * from an event to the next.
+     */
+    private _markMemo: Map<number, CrossingMarks> | null = null;
+
     /** Tunnel enclosure meshes (walls + ceiling) for fully underground segments, keyed by draw data key. */
     private _tunnelWallMap: Map<string, MeshSimple> = new Map();
     private _tunnelCeilingMap: Map<string, MeshSimple> = new Map();
@@ -512,18 +522,21 @@ export class TrackRenderSystem {
      */
     private _drawExistingTrack(): void {
         const lineStyle = this._renderStyle !== 'detailed';
-        for (const segmentNumber of this._trackCurveManager.livingEntities) {
-            const segment =
-                this._trackCurveManager.getTrackSegmentWithJoints(
-                    segmentNumber
-                );
-            if (segment === null) continue;
-            if (lineStyle) {
-                this._drawLineSegment(segmentNumber, segment);
-            } else {
-                this._onAddTrackSegment(segmentNumber, segment);
+        this._withMarkMemo(() => {
+            for (const segmentNumber of this._trackCurveManager
+                .livingEntities) {
+                const segment =
+                    this._trackCurveManager.getTrackSegmentWithJoints(
+                        segmentNumber
+                    );
+                if (segment === null) continue;
+                if (lineStyle) {
+                    this._drawLineSegment(segmentNumber, segment);
+                } else {
+                    this._onAddTrackSegment(segmentNumber, segment);
+                }
             }
-        }
+        });
         const drawData = this._trackCurveManager.persistedDrawData;
         if (drawData.length > 0) {
             this._onNewTrackData(-1, drawData);
@@ -561,8 +574,10 @@ export class TrackRenderSystem {
     private _onSegmentStyleChanged({
         segmentNumber,
     }: SegmentStyleChange): void {
-        this._redrawLineSegment(segmentNumber);
-        this._redrawLineNeighboursOf(segmentNumber);
+        this._withMarkMemo(() => {
+            this._redrawLineSegment(segmentNumber);
+            this._redrawLineNeighboursOf(segmentNumber);
+        });
         const pieces = this._trackCurveManager.persistedDrawData.filter(
             drawData =>
                 drawData.originalTrackSegment.trackSegmentNumber ===
@@ -798,14 +813,44 @@ export class TrackRenderSystem {
     }
 
     /**
+     * Runs `handle`, which handles a model event, with the crossings of each
+     * segment found once however many draws ask for them: an event redraws a
+     * segment, the ones that cross it and the ones in reach of both, and each
+     * draw asks for the marks of every segment in its own reach. The model
+     * doesn't change while an event is handled, and the memo is dropped when
+     * the handling ends. A call inside another shares its memo.
+     */
+    private _withMarkMemo<T>(handle: () => T): T {
+        if (this._markMemo !== null) return handle();
+        this._markMemo = new Map();
+        try {
+            return handle();
+        } finally {
+            this._markMemo = null;
+        }
+    }
+
+    /**
      * The decks and gaps that the tracks crossing `segment` put on it, and the
      * segments that cross it, level crossings included, since a change to
-     * either can turn a crossing into a bridge. It records nothing.
+     * either can turn a crossing into a bridge. It records nothing. The marks
+     * are memoised during an event; the partners are a set of the caller's own.
      */
     private _crossingMarksOf(
         curveNumber: number,
         segment: TrackSegmentWithCollision
-    ): { marks: CrossingMark[]; partners: Set<number> } {
+    ): CrossingMarks {
+        const known = this._markMemo?.get(curveNumber);
+        const found = known ?? this._findCrossingMarks(curveNumber, segment);
+        if (known === undefined) this._markMemo?.set(curveNumber, found);
+        return { marks: found.marks, partners: new Set(found.partners) };
+    }
+
+    /** {@link _crossingMarksOf}, found from the model. */
+    private _findCrossingMarks(
+        curveNumber: number,
+        segment: TrackSegmentWithCollision
+    ): CrossingMarks {
         const marks: CrossingMark[] = [];
         const partners = new Set<number>();
         const renderStyle = this._lineRenderStyle();
@@ -931,9 +976,10 @@ export class TrackRenderSystem {
      * Visits the segments along the joint at `end`, and the ones beyond them,
      * while the track walked stays under `MAX_MARK_HALF_LENGTH`: no mark
      * reaches further. `distance` is the length of the segments walked between
-     * the one visited and `end`, and `facingStart` whether it meets the walk at
-     * its start. Each segment is visited once, `curveNumber` never, so a loop
-     * of track ends the walk.
+     * the one visited and `end`, by the shortest way, and `facingStart` whether
+     * it meets the walk at its start. The nearest joint is expanded first, so a
+     * segment is visited once, at its shortest distance, and `curveNumber`
+     * never: a loop of track ends the walk.
      */
     private _walkJoints(
         curveNumber: number,
@@ -947,7 +993,12 @@ export class TrackRenderSystem {
     ): void {
         const visited = new Set([curveNumber]);
         const queue = [{ ...end, distance: 0 }];
-        for (let at = queue.shift(); at !== undefined; at = queue.shift()) {
+        while (queue.length > 0) {
+            let nearest = 0;
+            queue.forEach(({ distance }, i) => {
+                if (distance < queue[nearest]!.distance) nearest = i;
+            });
+            const at = queue.splice(nearest, 1)[0]!;
             for (const number of this._trackCurveManager.getSegmentsAtJoint(
                 at.joint,
                 at.position
@@ -2563,7 +2614,7 @@ export class TrackRenderSystem {
             removed?.destroy({ children: true });
             this._simplifiedTrackGraphicsMap.delete(curveNumber);
         }
-        this._forgetLineSegment(curveNumber);
+        this._withMarkMemo(() => this._forgetLineSegment(curveNumber));
 
         const ugEntry = this._undergroundIndicatorMap.get(curveNumber);
         if (ugEntry !== undefined) {
@@ -2580,8 +2631,10 @@ export class TrackRenderSystem {
         trackSegment: TrackSegmentWithCollision
     ) {
         if (this._renderStyle !== 'detailed') {
-            this._drawLineSegment(curveNumber, trackSegment);
-            this._redrawLineNeighboursOf(curveNumber);
+            this._withMarkMemo(() => {
+                this._drawLineSegment(curveNumber, trackSegment);
+                this._redrawLineNeighboursOf(curveNumber);
+            });
             return;
         }
 

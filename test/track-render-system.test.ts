@@ -1449,30 +1449,131 @@ describe('TrackRenderSystem: marks across joints', () => {
         expectSpans(lower[1]!, [[99 + GAP, 200]]);
     });
 
-    it('stops walking at a loop of track', () => {
+    it('stops walking at a loop of track shorter than the reach', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
+        const crossings = spyOn(graph.trackCurveManager, 'getCrossings');
         const tangent = { x: 1, y: 0 };
+        // A triangle with 7 m sides: its 21 m loop is inside the 25 m reach.
         const [left, right, bottom] = [
             { x: 95, y: 0 },
-            { x: 105, y: 0 },
-            { x: 100, y: -8 },
+            { x: 102, y: 0 },
+            { x: 98.5, y: -6 },
         ].map(point => graph.createNewEmptyJoint(point, tangent));
-        expect(graph.connectJoints(left!, right!, [{ x: 100, y: 0 }])).toBe(
+        expect(graph.connectJoints(left!, right!, [{ x: 98.5, y: 0 }])).toBe(
             true
         );
         expect(
-            graph.connectJoints(right!, bottom!, [{ x: 102.5, y: -4 }])
+            graph.connectJoints(right!, bottom!, [{ x: 100.25, y: -3 }])
         ).toBe(true);
-        expect(graph.connectJoints(bottom!, left!, [{ x: 97.5, y: -4 }])).toBe(
+        expect(graph.connectJoints(bottom!, left!, [{ x: 96.75, y: -3 }])).toBe(
             true
         );
         const top = graph.getJoint(left!)!.connections.get(right!)!;
 
-        layLine(graph, { x: 96, y: 5 }, { x: 96, y: -1 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 96, y: 5 }, { x: 96, y: -0.5 }, ELEVATION.ABOVE_1);
 
-        const spans = xSpans(linesOf(host, top));
-        expect(spans[0]![0]).toBeCloseTo(96 + GAP, 6);
+        expectSpans(xSpans(linesOf(host, top)), [[96 + GAP, 102]]);
+        // Walking from the top side's start, the other two sides are each
+        // visited once, by their shortest way, and the walk ends there.
+        const visits: { number: number; distance: number }[] = [];
+        (renderer as any)._walkJoints(
+            top,
+            { joint: left!, position: { x: 95, y: 0 } },
+            ({ number, distance }: (typeof visits)[number]) =>
+                visits.push({ number, distance })
+        );
+        const leftSide = graph.getJoint(bottom!)!.connections.get(left!)!;
+        const rightSide = graph.getJoint(right!)!.connections.get(bottom!)!;
+        expect(visits.map(visit => visit.number)).toEqual([
+            leftSide,
+            rightSide,
+        ]);
+        expect(visits[0]!.distance).toBe(0);
+        expect(visits[1]!.distance).toBeCloseTo(Math.hypot(3.5, 6), 3);
+        // Four segments, and four additions that each look a segment up at
+        // most once: not a lap round the loop for every one.
+        expect(crossings.mock.calls.length).toBeLessThanOrEqual(4 * 4);
+    });
+
+    it('carries a gap the short way round a loop, not the way with fewer segments', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const tangent = { x: 1, y: 0 };
+        const joint = (x: number, y: number) =>
+            graph.createNewEmptyJoint({ x, y }, tangent);
+        const [far, j0, j1, k, end] = [
+            joint(-20, 0),
+            joint(0, 0),
+            joint(4, 0),
+            joint(2, 0.3),
+            joint(30, 0),
+        ];
+        const segmentBetween = (from: number, to: number) =>
+            graph.getJoint(from)!.connections.get(to)!;
+        // The track `n` ends at j0. From there j1 is 4.04 m away through k
+        // (two segments) and 5.2 m away by the curved segment, which is one.
+        expect(graph.connectJoints(far!, j0!, [{ x: -10, y: 0 }])).toBe(true);
+        expect(graph.connectJoints(j0!, j1!, [{ x: 2, y: -3 }])).toBe(true);
+        expect(graph.connectJoints(j0!, k!, [{ x: 1, y: 0.15 }])).toBe(true);
+        expect(graph.connectJoints(k!, j1!, [{ x: 3, y: 0.15 }])).toBe(true);
+        expect(graph.connectJoints(j1!, end!, [{ x: 17, y: 0 }])).toBe(true);
+        const n = segmentBetween(far!, j0!);
+        const shortWay = 2 * Math.hypot(2, 0.3);
+
+        // The track at 10° over m, 10 m along it, puts a gap on m that reaches
+        // 4.6 m past j1: more than the short way, less than the long one.
+        const angle = (10 * Math.PI) / 180;
+        layLine(
+            graph,
+            { x: 14 + 50 * Math.cos(angle), y: -50 * Math.sin(angle) },
+            { x: 14 - 50 * Math.cos(angle), y: 50 * Math.sin(angle) },
+            ELEVATION.ABOVE_1
+        );
+
+        const overflow = (P + 0.5) / Math.sin(angle) - 10;
+        expect(overflow).toBeGreaterThan(shortWay);
+        expect(overflow).toBeLessThan(5.1);
+        expectSpans(xSpans(linesOf(host, n)), [[-20, -(overflow - shortWay)]]);
+    });
+
+    it('finds the crossings of each segment once per event', () => {
+        const { graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { joints, segments } = layTrack(
+            graph,
+            [0, 10, 20, 30, 40, 50, 60].map(x => ({ x, y: 0 }))
+        );
+        layLine(graph, { x: 25, y: -20 }, { x: 25, y: 20 }, ELEVATION.ABOVE_1);
+        const crossings = spyOn(graph.trackCurveManager, 'getCrossings');
+        const askedBy = (event: () => void): number[] => {
+            crossings.mockClear();
+            event();
+            return crossings.mock.calls.map(([segment]) => segment);
+        };
+        const expectOnce = (asked: number[]) => {
+            expect(asked.length).toBeGreaterThan(0);
+            expect(new Set(asked).size).toBe(asked.length);
+        };
+
+        expectOnce(
+            askedBy(() => {
+                const next = graph.createNewEmptyJoint(
+                    { x: 70, y: 0 },
+                    { x: 1, y: 0 }
+                );
+                graph.connectJoints(joints[6]!, next, [{ x: 65, y: 0 }]);
+            })
+        );
+        expectOnce(
+            askedBy(() =>
+                graph.setSegmentStyle(segments[3]!, {
+                    lineStyle: { preset: 'bridge' },
+                })
+            )
+        );
+        expectOnce(askedBy(() => graph.removeTrackSegment(segments[4]!)));
+        expectOnce(askedBy(() => (renderer.renderStyle = 'rails')));
     });
 
     it('cuts both segments once at a crossing on the joint', () => {
