@@ -40,6 +40,7 @@ import {
     buriedByTerrain,
     crossingMark,
     isUnderground,
+    markSpan,
     needsRunEndMark,
     sampleLine,
 } from './line-track-geometry.js';
@@ -784,7 +785,9 @@ export class TrackRenderSystem {
             renderStyle,
             terrain,
             metresPerPixel: 1 / this._camera.zoomLevel,
-            marks: this._crossingMarks(curveNumber, segment, heights),
+            marks: this._crossingMarks(curveNumber, segment, heights).map(
+                mark => markSpan(mark, segment.curve.fullLength).span
+            ),
             runEnds: {
                 start: this._needsRunEndMark(curveNumber, segment, ends[0]!, 0),
                 end: this._needsRunEndMark(curveNumber, segment, ends[1]!, 1),
