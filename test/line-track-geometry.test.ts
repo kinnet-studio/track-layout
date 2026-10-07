@@ -1028,6 +1028,22 @@ describe('markSpan', () => {
         expect(atEnd.span).toMatchObject({ from: 96, to: 100 });
         expect(atEnd.overflow.end).toBeCloseTo(2, 9);
     });
+
+    it('treats an overflow of float noise as none, so the deck keeps its wing there', () => {
+        const noisy = markSpan(
+            { kind: 'deck', s: 98, halfLength: 2 + 1e-12 },
+            100
+        );
+
+        expect(noisy.overflow.end).toBe(0);
+        expect(noisy.span.wings.end).toBe(true);
+        const atStart = markSpan(
+            { kind: 'deck', s: 2, halfLength: 2 + 1e-12 },
+            100
+        );
+        expect(atStart.overflow.start).toBe(0);
+        expect(atStart.span.wings.start).toBe(true);
+    });
 });
 
 describe('carrySpan', () => {
@@ -1062,6 +1078,13 @@ describe('carrySpan', () => {
             },
             remaining: 2,
         });
+    });
+
+    it('treats what is left over by float noise as nothing, so the deck ends here with a wing', () => {
+        const carried = carrySpan('deck', 5 + 1e-12, 5, 'start');
+
+        expect(carried.remaining).toBe(0);
+        expect(carried.span.wings).toEqual({ start: false, end: true });
     });
 });
 

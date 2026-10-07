@@ -31,13 +31,17 @@ import type { LayerHost } from './layer-host.js';
 import {
     type CrossingMark,
     type CrossingSide,
+    GAP_CLEARANCE,
     type LineHeights,
     type LineTrackDrawing,
     type LineTrackInput,
+    MAX_MARK_HALF_LENGTH,
+    type MarkSpan,
     RESTROKE_ZOOM_STEP,
     type RunEndNeighbour,
     buildLineTrack,
     buriedByTerrain,
+    carrySpan,
     crossingMark,
     isUnderground,
     markSpan,
@@ -762,8 +766,8 @@ export class TrackRenderSystem {
 
     /**
      * What the geometry needs to draw `segment` in the current line style:
-     * its samples, its heights in metres, the decks and gaps the tracks that
-     * cross it put on it, and whether each end gets a portal or wings, given
+     * its samples, its heights in metres, the decks and gaps on it (see
+     * {@link _markSpans}), and whether each end gets a portal or wings, given
      * what else meets it there. It also records who crosses it, in
      * `_linePartners`.
      */
@@ -785,9 +789,7 @@ export class TrackRenderSystem {
             renderStyle,
             terrain,
             metresPerPixel: 1 / this._camera.zoomLevel,
-            marks: this._crossingMarks(curveNumber, segment, heights).map(
-                mark => markSpan(mark, segment.curve.fullLength).span
-            ),
+            marks: this._markSpans(curveNumber, segment, ends),
             runEnds: {
                 start: this._needsRunEndMark(curveNumber, segment, ends[0]!, 0),
                 end: this._needsRunEndMark(curveNumber, segment, ends[1]!, 1),
@@ -796,18 +798,18 @@ export class TrackRenderSystem {
     }
 
     /**
-     * The decks and gaps that the tracks crossing `segment` put on it. It
-     * also sets which segments those are in `_linePartners`, level crossings
-     * included, since a change to either can turn a crossing into a bridge.
+     * The decks and gaps that the tracks crossing `segment` put on it, and the
+     * segments that cross it, level crossings included, since a change to
+     * either can turn a crossing into a bridge. It records nothing.
      */
-    private _crossingMarks(
+    private _crossingMarksOf(
         curveNumber: number,
-        segment: TrackSegmentWithCollision,
-        heights: LineHeights
-    ): CrossingMark[] {
+        segment: TrackSegmentWithCollision
+    ): { marks: CrossingMark[]; partners: Set<number> } {
         const marks: CrossingMark[] = [];
         const partners = new Set<number>();
         const renderStyle = this._lineRenderStyle();
+        const heights = heightsOf(segment);
         for (const crossing of this._trackCurveManager.getCrossings(
             curveNumber
         )) {
@@ -834,17 +836,166 @@ export class TrackRenderSystem {
                 self,
                 across,
                 this._terrainData,
-                renderStyle
+                renderStyle,
+                GAP_CLEARANCE
             );
             if (mark !== null) marks.push(mark);
         }
+        return { marks, partners };
+    }
+
+    /**
+     * The decks and gaps drawn on `segment`: the ones its own crossings put
+     * on it, and the part of those on the segments within reach along its
+     * joints that carries on across them. A deck gets a wing only where it
+     * ends: inside the segment, or at an open end. It also sets who crosses
+     * `segment` in `_linePartners`, from its own crossings only.
+     */
+    private _markSpans(
+        curveNumber: number,
+        segment: TrackSegmentWithCollision,
+        ends: LineTrackRecord['ends']
+    ): MarkSpan[] {
+        const { marks, partners } = this._crossingMarksOf(curveNumber, segment);
         this._linePartners.set(curveNumber, partners);
         for (const partner of partners) {
             const theirs = this._linePartners.get(partner) ?? new Set<number>();
             theirs.add(curveNumber);
             this._linePartners.set(partner, theirs);
         }
-        return marks;
+
+        const length = segment.curve.fullLength;
+        const spans = marks.map(mark => {
+            const { span, overflow } = markSpan(mark, length);
+            if (overflow.start > 0 && this._isOpenEnd(curveNumber, ends[0]!)) {
+                span.wings.start = true;
+            }
+            if (overflow.end > 0 && this._isOpenEnd(curveNumber, ends[1]!)) {
+                span.wings.end = true;
+            }
+            return span;
+        });
+        spans.push(...this._carriedSpans(curveNumber, ends, length));
+        return spans;
+    }
+
+    /**
+     * The spans that the marks of the segments reached from each end of
+     * `curveNumber` put on it: what their overflow toward it has left once the
+     * segments between are crossed. What is left past the far end gets a wing
+     * there when that end is open.
+     */
+    private _carriedSpans(
+        curveNumber: number,
+        ends: LineTrackRecord['ends'],
+        length: number
+    ): MarkSpan[] {
+        const spans: MarkSpan[] = [];
+        for (const enteringAt of ['start', 'end'] as const) {
+            const from = enteringAt === 'start' ? 0 : 1;
+            this._walkJoints(
+                curveNumber,
+                ends[from]!,
+                ({ number, segment, facingStart, distance }) => {
+                    const towards = facingStart ? 'start' : 'end';
+                    const { marks } = this._crossingMarksOf(number, segment);
+                    for (const mark of marks) {
+                        const { overflow } = markSpan(
+                            mark,
+                            segment.curve.fullLength
+                        );
+                        if (overflow[towards] <= distance) continue;
+                        const { span, remaining } = carrySpan(
+                            mark.kind,
+                            overflow[towards] - distance,
+                            length,
+                            enteringAt
+                        );
+                        const far = ends[1 - from]!;
+                        if (
+                            remaining > 0 &&
+                            this._isOpenEnd(curveNumber, far)
+                        ) {
+                            if (enteringAt === 'start') span.wings.end = true;
+                            else span.wings.start = true;
+                        }
+                        spans.push(span);
+                    }
+                }
+            );
+        }
+        return spans;
+    }
+
+    /**
+     * Visits the segments along the joint at `end`, and the ones beyond them,
+     * while the track walked stays under `MAX_MARK_HALF_LENGTH`: no mark
+     * reaches further. `distance` is the length of the segments walked between
+     * the one visited and `end`, and `facingStart` whether it meets the walk at
+     * its start. Each segment is visited once, `curveNumber` never, so a loop
+     * of track ends the walk.
+     */
+    private _walkJoints(
+        curveNumber: number,
+        end: LineTrackRecord['ends'][number],
+        visit: (reached: {
+            number: number;
+            segment: TrackSegmentWithCollision;
+            facingStart: boolean;
+            distance: number;
+        }) => void
+    ): void {
+        const visited = new Set([curveNumber]);
+        const queue = [{ ...end, distance: 0 }];
+        for (let at = queue.shift(); at !== undefined; at = queue.shift()) {
+            for (const number of this._trackCurveManager.getSegmentsAtJoint(
+                at.joint,
+                at.position
+            )) {
+                if (visited.has(number)) continue;
+                visited.add(number);
+                const segment =
+                    this._trackCurveManager.getTrackSegmentWithJoints(number);
+                if (segment === null) continue;
+                const facingStart = segment.t0Joint === at.joint;
+                visit({ number, segment, facingStart, distance: at.distance });
+                const distance = at.distance + segment.curve.fullLength;
+                if (distance < MAX_MARK_HALF_LENGTH) {
+                    queue.push({
+                        ...lineEndsOf(segment)[facingStart ? 1 : 0]!,
+                        distance,
+                    });
+                }
+            }
+        }
+    }
+
+    /**
+     * The segments within `MAX_MARK_HALF_LENGTH` of track along the joints at
+     * `ends`, other than `curveNumber`: the ones that can carry its marks, or
+     * have theirs carried onto it.
+     */
+    private _reachOf(
+        curveNumber: number,
+        ends: LineTrackRecord['ends']
+    ): number[] {
+        const reached = new Set<number>();
+        for (const end of ends) {
+            this._walkJoints(curveNumber, end, ({ number }) =>
+                reached.add(number)
+            );
+        }
+        return [...reached];
+    }
+
+    /** Whether no segment other than `curveNumber` meets it at `end`. */
+    private _isOpenEnd(
+        curveNumber: number,
+        end: LineTrackRecord['ends'][number]
+    ): boolean {
+        return this._trackCurveManager
+            .getSegmentsAtJoint(end.joint, end.position)
+            .every(number => number === curveNumber);
     }
 
     /**
@@ -915,23 +1066,44 @@ export class TrackRenderSystem {
 
     /**
      * Redraws what a change to `curveNumber` can change in other segments: the
-     * ones that cross it, which get or lose a deck or a gap, and the `tunnel`
-     * and `bridge` segments at its ends, which get or lose a portal or wings.
-     * A segment that isn't drawn is skipped, which is what lets track load in
-     * any order.
+     * ones that cross it, which get or lose a deck or a gap, the `tunnel` and
+     * `bridge` segments at its ends, which get or lose a portal or wings, and
+     * the segments within reach along the joints of it and of its partners,
+     * which get or lose the part of a deck or gap that carries across. A
+     * segment that isn't drawn is skipped, which is what lets track load in any
+     * order.
      */
     private _redrawLineNeighbours(
         curveNumber: number,
         partners: Iterable<number>,
         ends: LineTrackRecord['ends']
     ): void {
+        const partnerList = [...partners];
         const affected = new Set([
-            ...partners,
+            ...partnerList,
             ...this._presetNeighbours(curveNumber, ends),
+            ...this._reachOf(curveNumber, ends),
         ]);
+        for (const partner of partnerList) {
+            const theirEnds = this._endsOf(partner);
+            if (theirEnds === null) continue;
+            for (const number of this._reachOf(partner, theirEnds)) {
+                affected.add(number);
+            }
+        }
+        affected.delete(curveNumber);
         for (const number of affected) {
             this._redrawLineSegment(number);
         }
+    }
+
+    /** The joints and end points of a segment, from its record or else from the model; null when it is in neither. */
+    private _endsOf(curveNumber: number): LineTrackRecord['ends'] | null {
+        const record = this._lineTracks.get(curveNumber);
+        if (record !== undefined) return record.ends;
+        const segment =
+            this._trackCurveManager.getTrackSegmentWithJoints(curveNumber);
+        return segment === null ? null : lineEndsOf(segment);
     }
 
     /** {@link _redrawLineNeighbours} for a segment that is drawn; does nothing for one that isn't. */
@@ -2363,10 +2535,11 @@ export class TrackRenderSystem {
 
     /**
      * Drops a removed line-style segment's record and partner links, then
-     * redraws what it was crossing, which loses its deck or gap, and the
-     * `tunnel` and `bridge` segments at its ends, whose run ends may change.
-     * The model no longer has the segment, so only what was recorded about it
-     * is used.
+     * redraws what it was crossing, which loses its deck or gap, the `tunnel`
+     * and `bridge` segments at its ends, whose run ends may change, and the
+     * segments in reach of it and of what it crossed, which lose what carried
+     * across. The model no longer has the segment, so only what was recorded
+     * about it is used.
      */
     private _forgetLineSegment(curveNumber: number): void {
         const record = this._lineTracks.get(curveNumber);

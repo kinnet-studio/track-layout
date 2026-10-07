@@ -333,19 +333,24 @@ export type MarkSpan = {
     wings: { start: boolean; end: boolean };
 };
 
+/** `amount` as a length that carries on, or 0 when it is only float noise. */
+const aboveNoise = (amount: number): number =>
+    amount > EMPTY_INTERVAL ? amount : 0;
+
 /**
  * A mark's span on its own segment, clamped to [0, `length`], and how far the
  * mark overflows each end. A deck has a wing at an end that lies inside the
  * segment; at an end that overflows the flag is false, and the caller sets it
- * once it knows whether a neighbour continues the deck.
+ * once it knows whether a neighbour continues the deck. An overflow of float
+ * noise counts as none, so a deck that ends at a joint keeps its wing there.
  */
 export function markSpan(
     mark: CrossingMark,
     length: number
 ): { span: MarkSpan; overflow: { start: number; end: number } } {
     const overflow = {
-        start: Math.max(0, mark.halfLength - mark.s),
-        end: Math.max(0, mark.s + mark.halfLength - length),
+        start: aboveNoise(mark.halfLength - mark.s),
+        end: aboveNoise(mark.s + mark.halfLength - length),
     };
     return {
         span: {
@@ -362,9 +367,9 @@ export function markSpan(
  * The part of an `overflow` that lands on a neighbour of `length` entered at
  * its `'start'` or `'end'`, and what is left over to pass on. The wing at the
  * entry side is false, since the deck continues across the joint; the one at
- * the far side is true when nothing is left over, since the deck ends inside
- * this segment. When something is left, that flag starts false, and the caller
- * resolves it as it does for {@link markSpan}.
+ * the far side is true when nothing is left over (float noise is nothing),
+ * since the deck ends inside this segment. When something is left, that flag
+ * starts false, and the caller resolves it as it does for {@link markSpan}.
  */
 export function carrySpan(
     kind: MarkSpan['kind'],
@@ -373,7 +378,7 @@ export function carrySpan(
     enteringAt: 'start' | 'end'
 ): { span: MarkSpan; remaining: number } {
     const covered = Math.min(overflow, length);
-    const remaining = Math.max(0, overflow - length);
+    const remaining = aboveNoise(overflow - length);
     const farWing = remaining === 0;
     return {
         span:
