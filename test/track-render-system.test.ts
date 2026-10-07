@@ -1463,6 +1463,28 @@ describe('TrackRenderSystem: marks across joints', () => {
         expectSpans(xSpans(linesOf(host, 1)), [[100, 200]]);
     });
 
+    it('restores the next segment when the crossed lower segment is removed', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layGapScene(graph);
+        expectSpans(xSpans(linesOf(host, 1)), carriedGap[1]!);
+
+        graph.removeTrackSegment(0);
+
+        expectSpans(xSpans(linesOf(host, 1)), [[100, 200]]);
+    });
+
+    it('restores both sides of the joint when the upper track becomes a tunnel', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const upper = layGapScene(graph);
+
+        graph.setSegmentStyle(upper, { lineStyle: { preset: 'tunnel' } });
+
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 100]]);
+        expectSpans(xSpans(linesOf(host, 1)), [[100, 200]]);
+    });
+
     it('draws carried gaps after loading a saved layout', async () => {
         const source = new TrackGraph();
         layGapScene(source);
