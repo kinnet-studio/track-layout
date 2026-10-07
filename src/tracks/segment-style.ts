@@ -1,4 +1,4 @@
-import type { TrackSegment, TrackStyle } from './types.js';
+import type { TrackLineStyle, TrackSegment, TrackStyle } from './types.js';
 
 /** Appearance applied to segments when they are created. */
 export type SegmentStyle = {
@@ -9,12 +9,19 @@ export type SegmentStyle = {
     bed: boolean;
     /** Bed width in metres, applied to new segments while `bed` is on. */
     bedWidth: number;
+    /** How the line render styles draw this segment; unset fields come from the preset. */
+    lineStyle?: TrackLineStyle;
 };
 
 /** The style fields stored on each segment and saved with it. */
 export type SegmentStyleFields = Pick<
     TrackSegment,
-    'trackStyle' | 'electrified' | 'catenarySide' | 'bed' | 'bedWidth'
+    | 'trackStyle'
+    | 'electrified'
+    | 'catenarySide'
+    | 'bed'
+    | 'bedWidth'
+    | 'lineStyle'
 >;
 
 /** Payload of TrackGraph.onSegmentStyleChanged. */
@@ -31,6 +38,26 @@ export const DEFAULT_SEGMENT_STYLE: Readonly<SegmentStyle> = Object.freeze({
 });
 
 /**
+ * A copy of `style` holding only its defined fields, or undefined when it has
+ * none. Keeps two segments from sharing one object and stores an empty style
+ * as unset.
+ */
+export function normalizeLineStyle(
+    style: TrackLineStyle | undefined
+): TrackLineStyle | undefined {
+    if (style === undefined) {
+        return undefined;
+    }
+    const copy: TrackLineStyle = {};
+    for (const key of Object.keys(style) as (keyof TrackLineStyle)[]) {
+        if (style[key] !== undefined) {
+            (copy as Record<string, unknown>)[key] = style[key];
+        }
+    }
+    return Object.keys(copy).length > 0 ? copy : undefined;
+}
+
+/**
  * The fields stored on a segment laid with `style`. The bed width is only
  * stored while the bed is on, because snapping, parallel spacing and platform
  * offsets treat a stored bed width as the track's footprint.
@@ -44,6 +71,7 @@ export function segmentFieldsFromStyle(
         catenarySide: style.catenarySide,
         bed: style.bed,
         bedWidth: style.bed ? style.bedWidth : undefined,
+        lineStyle: normalizeLineStyle(style.lineStyle),
     };
 }
 
@@ -60,6 +88,7 @@ export function withStyleDefaults(
         bedWidth:
             saved.bedWidth ??
             (bed ? DEFAULT_SEGMENT_STYLE.bedWidth : undefined),
+        lineStyle: normalizeLineStyle(saved.lineStyle),
     };
 }
 
@@ -71,6 +100,7 @@ export function styleFieldsOf(segment: SegmentStyleFields): SegmentStyleFields {
         catenarySide: segment.catenarySide,
         bed: segment.bed,
         bedWidth: segment.bedWidth,
+        lineStyle: normalizeLineStyle(segment.lineStyle),
     };
 }
 
@@ -80,6 +110,7 @@ const STYLE_KEYS = [
     'catenarySide',
     'bed',
     'bedWidth',
+    'lineStyle',
 ] as const;
 
 /**
@@ -104,5 +135,6 @@ export function applyStylePatch(
             ? Math.max(1, width)
             : DEFAULT_SEGMENT_STYLE.bedWidth
         : undefined;
+    merged.lineStyle = normalizeLineStyle(merged.lineStyle);
     return merged;
 }

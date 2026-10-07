@@ -1428,6 +1428,7 @@ export class TrackGraph {
                         catenarySide: segment.catenarySide,
                         bed: segment.bed,
                         bedWidth: segment.bedWidth,
+                        lineStyle: segment.lineStyle,
                     }
                 );
             }

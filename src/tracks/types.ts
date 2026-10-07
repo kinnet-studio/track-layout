@@ -29,6 +29,24 @@ export const ELEVATION_MAX: ELEVATION = (ELEVATION_VALUES[
     ELEVATION_VALUES.length - 1
 ] ?? ELEVATION.ABOVE_3) as ELEVATION;
 
+/** Line styles the `centerline` and `rails` render styles recognise. */
+export const LINE_PRESETS = ['tunnel', 'bridge', 'planned', 'disused'] as const;
+export type LinePreset = (typeof LINE_PRESETS)[number];
+
+/** Dash patterns for a segment's line. */
+export const LINE_PATTERNS = ['solid', 'dashed', 'dotted', 'dash-dot'] as const;
+export type LinePattern = (typeof LINE_PATTERNS)[number];
+
+/** How the line styles draw a segment. Unset fields come from the preset, then the defaults. */
+export type TrackLineStyle = {
+    preset?: LinePreset;
+    pattern?: LinePattern;
+    /** 0xRRGGBB. */
+    color?: number;
+    /** Line width in screen pixels, 1 to 8. */
+    width?: number;
+};
+
 export type TrackSegment = {
     t0Joint: number;
     t1Joint: number;
@@ -44,6 +62,8 @@ export type TrackSegment = {
     catenarySide?: 1 | -1;
     /** Whether this track segment should render a bed (gravel foundation below the ballast). */
     bed?: boolean;
+    /** How the line render styles draw this segment; unset fields come from the preset. */
+    lineStyle?: TrackLineStyle;
     splits: number[];
     splitCurves: {
         curve: BCurve;
@@ -114,6 +134,8 @@ export type TrackSegmentDrawData = {
     bedWidth?: number;
     /** Whether this track segment should render a bed (gravel foundation below the ballast). */
     bed?: boolean;
+    /** How the line render styles draw this segment; unset fields come from the preset. */
+    lineStyle?: TrackLineStyle;
 };
 
 export type TrackSegmentSplit = {
@@ -226,6 +248,8 @@ export type SerializedTrackSegment = {
     bed?: boolean;
     /** Bed width in metres; present on segments laid with a bed. */
     bedWidth?: number;
+    /** How the line render styles draw this segment; unset fields come from the preset. */
+    lineStyle?: TrackLineStyle;
 };
 
 export type SerializedTrackData = {
@@ -433,9 +457,54 @@ export function validateSerializedTrackData(
                 error: `${prefix}.bedWidth must be a positive number`,
             };
         }
+        if (s.lineStyle !== undefined) {
+            const error = validateLineStyle(s.lineStyle, `${prefix}.lineStyle`);
+            if (error !== null) {
+                return { valid: false, error };
+            }
+        }
     }
 
     return { valid: true };
+}
+
+/** The first problem with a saved line style, or null when it is valid. */
+function validateLineStyle(value: unknown, prefix: string): string | null {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return `${prefix} must be an object`;
+    }
+    const style = value as Record<string, unknown>;
+    if (
+        style.preset !== undefined &&
+        !(LINE_PRESETS as readonly unknown[]).includes(style.preset)
+    ) {
+        return `${prefix}.preset must be one of ${LINE_PRESETS.join(', ')}`;
+    }
+    if (
+        style.pattern !== undefined &&
+        !(LINE_PATTERNS as readonly unknown[]).includes(style.pattern)
+    ) {
+        return `${prefix}.pattern must be one of ${LINE_PATTERNS.join(', ')}`;
+    }
+    const color = style.color;
+    if (
+        color !== undefined &&
+        !(
+            Number.isInteger(color) &&
+            (color as number) >= 0 &&
+            (color as number) <= 0xffffff
+        )
+    ) {
+        return `${prefix}.color must be an integer from 0 to 0xFFFFFF`;
+    }
+    const width = style.width;
+    if (
+        width !== undefined &&
+        !(typeof width === 'number' && width >= 1 && width <= 8)
+    ) {
+        return `${prefix}.width must be a number from 1 to 8`;
+    }
+    return null;
 }
 
 function isPoint(v: unknown): v is Point {

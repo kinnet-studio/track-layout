@@ -15,6 +15,7 @@ import {
     type SegmentStyleChange,
     type SegmentStyleFields,
     applyStylePatch,
+    normalizeLineStyle,
     segmentFieldsFromStyle,
     styleFieldsOf,
     withStyleDefaults,
@@ -123,14 +124,23 @@ export class TrackCurveManager {
         return this._newSegmentStyle;
     }
 
-    /** Merges `style` into the style for new segments. The bed width is clamped to at least 1 m. */
+    /**
+     * Merges `style` into the style for new segments. The bed width is clamped
+     * to at least 1 m. An explicit `undefined` clears `catenarySide` and
+     * `lineStyle`.
+     */
     setNewSegmentStyle(style: Partial<SegmentStyle>): void {
         const next: SegmentStyle = { ...this._newSegmentStyle };
         for (const key of Object.keys(style) as (keyof SegmentStyle)[]) {
-            if (style[key] !== undefined || key === 'catenarySide') {
+            if (
+                style[key] !== undefined ||
+                key === 'catenarySide' ||
+                key === 'lineStyle'
+            ) {
                 (next as Record<string, unknown>)[key] = style[key];
             }
         }
+        next.lineStyle = normalizeLineStyle(next.lineStyle);
         next.bedWidth = Number.isFinite(next.bedWidth)
             ? Math.max(1, next.bedWidth)
             : DEFAULT_SEGMENT_STYLE.bedWidth;
@@ -1159,6 +1169,7 @@ export class TrackCurveManager {
         return this._internalTrackCurveManager
             .getLivingEntitiesWithIndex()
             .map(({ index, entity }) => {
+                const { lineStyle } = entity.segment;
                 return {
                     segmentNumber: index,
                     controlPoints: entity.segment.curve
@@ -1177,6 +1188,7 @@ export class TrackCurveManager {
                     catenarySide: entity.segment.catenarySide,
                     bed: entity.segment.bed,
                     bedWidth: entity.segment.bedWidth,
+                    ...(lineStyle ? { lineStyle: { ...lineStyle } } : {}),
                 };
             });
     }
@@ -1416,6 +1428,7 @@ export class TrackCurveManager {
                     catenarySide: segment.catenarySide,
                     bed: segment.bed,
                     bedWidth: segment.bedWidth,
+                    lineStyle: segment.lineStyle,
                 }
             );
         }
