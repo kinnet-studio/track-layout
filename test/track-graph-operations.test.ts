@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { type SegmentSplitInfo, TrackGraph } from '../src/tracks/track.js';
 import { ELEVATION } from '../src/tracks/types.js';
+import { layLine } from './track-helpers.js';
 
 const EAST = { x: 1, y: 0 };
 
@@ -158,6 +159,28 @@ describe('TrackGraph.insertJointIntoTrackSegment', () => {
 });
 
 describe('TrackGraph.removeTrackSegment', () => {
+    it('removes every segment of parallel rows of short track', () => {
+        const graph = new TrackGraph();
+        const segments: number[] = [];
+        for (let row = 0; row < 3; row++) {
+            for (let i = 0; i < 30; i++) {
+                segments.push(
+                    layLine(
+                        graph,
+                        { x: i * 5, y: row * 10 },
+                        { x: i * 5 + 5, y: row * 10 }
+                    )
+                );
+            }
+        }
+
+        for (const segment of segments) graph.removeTrackSegment(segment);
+
+        for (const segment of segments) {
+            expect(graph.getTrackSegmentWithJoints(segment)).toBeNull();
+        }
+    });
+
     it('removes the segment and deletes joints left with no connections', () => {
         const { graph, a, b, ab } = straightLine();
         const removed: number[] = [];
