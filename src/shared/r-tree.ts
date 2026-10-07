@@ -314,14 +314,28 @@ class RTree<T> {
 
     // Remove an entry from the tree by rectangle and data
     remove(rectangle: Rectangle, data: T): boolean {
-        const result = this.deleteEntry(this.root, rectangle, data);
-
-        // Handle root becoming empty or having only one child
-        if (!this.root.isLeaf && this.root.entries.length === 1) {
-            this.root = this.root.entries[0].child!;
+        // Items of the nodes dissolved on the way back up. They go back in
+        // only once the tree is whole again: reinserting mid-descent can walk
+        // into a node emptied by the dissolve, or split a node the descent is
+        // still working on.
+        const orphans: RTreeEntry<T>[] = [];
+        if (!this.deleteEntry(this.root, rectangle, data, orphans)) {
+            return false;
         }
 
-        return result;
+        // Shrink the root: one with a single child hands over to that child,
+        // and one left with no children becomes an empty leaf
+        while (!this.root.isLeaf && this.root.entries.length === 1) {
+            this.root = this.root.entries[0].child!;
+        }
+        if (!this.root.isLeaf && this.root.entries.length === 0) {
+            this.root = new RTreeNode<T>(true);
+        }
+
+        for (const orphan of orphans) {
+            this.insert(orphan.mbr, orphan.data!);
+        }
+        return true;
     }
 
     // Remove an entry from the tree by data only (searches for the data)
@@ -346,11 +360,13 @@ class RTree<T> {
         return null;
     }
 
-    // Internal method to delete an entry
+    // Internal method to delete an entry. A child left under the minimum
+    // fill is dissolved: it leaves `node` and its items go to `orphans`.
     private deleteEntry(
         node: RTreeNode<T>,
         rectangle: Rectangle,
-        data: T
+        data: T,
+        orphans: RTreeEntry<T>[]
     ): boolean {
         if (node.isLeaf) {
             // Find and remove the entry from leaf node
@@ -365,51 +381,30 @@ class RTree<T> {
             // Remove the entry
             node.entries.splice(entryIndex, 1);
             return true;
-        } else {
-            // Find the child node that contains the entry
-            for (let i = 0; i < node.entries.length; i++) {
-                const entry = node.entries[i];
-                if (entry.mbr.contains(rectangle)) {
-                    const deleted = this.deleteEntry(
-                        entry.child!,
-                        rectangle,
-                        data
-                    );
-
-                    if (deleted) {
-                        // Update MBR of the child entry
-                        const newMBR = entry.child!.calculateMBR();
-                        if (newMBR) {
-                            entry.mbr = newMBR;
-                        }
-
-                        // Check if child node is underfilled
-                        if (entry.child!.entries.length < this.minEntries) {
-                            // Collect all entries from underfilled node
-                            const orphanedEntries: RTreeEntry<T>[] = [];
-                            this.collectAllEntries(
-                                entry.child!,
-                                orphanedEntries
-                            );
-
-                            // Remove the underfilled child
-                            node.entries.splice(i, 1);
-
-                            // Reinsert orphaned entries
-                            for (const orphanedEntry of orphanedEntries) {
-                                this.reinsertEntry(orphanedEntry);
-                            }
-                        }
-
-                        return true;
-                    }
-                }
-            }
-            return false; // Entry not found
         }
+
+        // Find the child node that contains the entry
+        for (let i = 0; i < node.entries.length; i++) {
+            const entry = node.entries[i];
+            if (
+                !entry.mbr.contains(rectangle) ||
+                !this.deleteEntry(entry.child!, rectangle, data, orphans)
+            ) {
+                continue;
+            }
+
+            if (entry.child!.entries.length < this.minEntries) {
+                this.collectAllEntries(entry.child!, orphans);
+                node.entries.splice(i, 1);
+            } else {
+                entry.mbr = entry.child!.calculateMBR()!;
+            }
+            return true;
+        }
+        return false; // Entry not found
     }
 
-    // Collect all entries from a node (including nested entries)
+    // Collect the item entries under a node (including nested entries)
     private collectAllEntries(
         node: RTreeNode<T>,
         entries: RTreeEntry<T>[]
@@ -421,25 +416,6 @@ class RTree<T> {
             // For internal nodes, recursively collect from children
             for (const entry of node.entries) {
                 this.collectAllEntries(entry.child!, entries);
-            }
-        }
-    }
-
-    // Reinsert an entry into the tree
-    private reinsertEntry(entry: RTreeEntry<T>): void {
-        if (entry.isLeaf()) {
-            // Reinsert data entry
-            this.insert(entry.mbr, entry.data!);
-        } else {
-            // Reinsert internal node - this is more complex
-            // For now, we'll collect all data from the subtree and reinsert
-            const dataEntries: RTreeEntry<T>[] = [];
-            this.collectAllEntries(entry.child!, dataEntries);
-
-            for (const dataEntry of dataEntries) {
-                if (dataEntry.isLeaf()) {
-                    this.insert(dataEntry.mbr, dataEntry.data!);
-                }
             }
         }
     }
