@@ -613,21 +613,24 @@ export class TrackRenderSystem {
      * Redraws every piece of a segment whose style changed in the model
      * (TrackGraph.setSegmentStyle). The draw data already carries the new
      * style, so each piece goes through the same remove-and-add path as a
-     * draw-data change. A line-style segment is drawn again in place, along
-     * with the segments it crosses and the `tunnel` and `bridge` segments at
-     * its ends, whose gaps, decks, portals or wings can change with it.
+     * draw-data change. A line-style segment is drawn again in place. When
+     * its preset changed, so are the segments it crosses, the `tunnel` and
+     * `bridge` segments at its ends and the segments in reach, whose gaps,
+     * decks, portals or wings can change with it; nothing else of a style
+     * changes them (see {@link _presetChanged}).
      */
     private _onSegmentStyleChanged({
         segmentNumber,
     }: SegmentStyleChange): void {
-        if (this._presetChanged(segmentNumber)) {
+        const presetChanged = this._presetChanged(segmentNumber);
+        if (presetChanged) {
             this._dropMarksOf(
                 segmentNumber,
                 this._linePartners.get(segmentNumber) ?? []
             );
         }
         this._redrawLineSegment(segmentNumber);
-        this._redrawLineNeighboursOf(segmentNumber);
+        if (presetChanged) this._redrawLineNeighboursOf(segmentNumber);
         const pieces = this._trackCurveManager.persistedDrawData.filter(
             drawData =>
                 drawData.originalTrackSegment.trackSegmentNumber ===

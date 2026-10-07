@@ -1718,6 +1718,8 @@ describe('TrackRenderSystem: marks across joints', () => {
                 [50 + GAP, 100],
             ]);
 
+            // Drawn again, v records only its own crossings, which miss h.
+            graph.setSegmentStyle(v, { lineStyle: { color: 0x2266cc } });
             graph.removeTrackSegment(v);
             redrawH(0xcc2266);
             expectSpans(xSpans(linesOf(host, h)), [[0, 100]]);
@@ -1739,6 +1741,45 @@ describe('TrackRenderSystem: marks across joints', () => {
             [0, 50 - GAP],
             [50 + GAP, 100],
         ]);
+    });
+
+    it('redraws only the restyled segment when its preset stays the same', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const upper = layGapScene(graph);
+        const disused = { preset: 'disused', pattern: 'solid' } as const;
+        graph.setSegmentStyle(1, { lineStyle: disused });
+        const draw = spyOn(renderer as any, '_drawLineSegment');
+        const drawnBy = (event: () => void): number[] => {
+            draw.mockClear();
+            event();
+            return draw.mock.calls.map(([segment]) => segment as number);
+        };
+
+        expect(
+            drawnBy(() =>
+                graph.setSegmentStyle(1, {
+                    lineStyle: { ...disused, color: 0xff0000 },
+                })
+            )
+        ).toEqual([1]);
+        expect(
+            drawnBy(() =>
+                graph.setSegmentStyle(upper, {
+                    lineStyle: { pattern: 'dashed', width: 3 },
+                })
+            )
+        ).toEqual([upper]);
+        expect(
+            drawnBy(() => graph.setSegmentStyle(0, { trackStyle: 'slab' }))
+        ).toEqual([0]);
+
+        // The redrawn segments keep what their neighbours put on them.
+        const red = linesOf(host, 1);
+        expect(red.length).toBeGreaterThan(0);
+        for (const line of red) expect(line.color).toBe(0xff0000);
+        expect(xSpans(red)[0]![0]).toBeCloseTo(99 + GAP, 6);
+        expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
     });
 
     it('finds its own marks again when a track becomes a bridge and stops being one', () => {
