@@ -1574,6 +1574,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         );
         expectOnce(askedBy(() => graph.removeTrackSegment(segments[4]!)));
         expectOnce(askedBy(() => (renderer.renderStyle = 'rails')));
+        expectOnce(askedBy(() => (renderer.bridgeGapClearance = 3)));
     });
 
     it('cuts both segments once at a crossing on the joint', () => {
@@ -1590,5 +1591,144 @@ describe('TrackRenderSystem: marks across joints', () => {
 
         expectSpans(xSpans(linesOf(host, 0)), [[0, 100 - GAP]]);
         expectSpans(xSpans(linesOf(host, 1)), [[100 + GAP, 200]]);
+    });
+
+    /** h along y = 0, then v across it at x = 50, one level up. */
+    function layCrossing(graph: TrackGraph) {
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        const v = layLine(
+            graph,
+            { x: 50, y: -50 },
+            { x: 50, y: 50 },
+            ELEVATION.ABOVE_1
+        );
+        return { h, v };
+    }
+
+    it('takes the gap clearance from its options', () => {
+        const { host, graph, renderer } = scene({ bridgeGapClearance: 3 });
+        renderer.renderStyle = 'centerline';
+
+        const { h } = layCrossing(graph);
+
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - (P + 3)],
+            [50 + (P + 3), 100],
+        ]);
+    });
+
+    it('redraws gaps in place when the clearance changes', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h } = layCrossing(graph);
+        const before = host.bandItem(`__simplified__${h}`);
+        expect(before).toBeDefined();
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - GAP],
+            [50 + GAP, 100],
+        ]);
+
+        renderer.bridgeGapClearance = 0;
+
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - P],
+            [50 + P, 100],
+        ]);
+        expect(host.bandItem(`__simplified__${h}`)).toBe(before);
+    });
+
+    it('redraws carried gaps when the clearance changes', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layGapScene(graph);
+        expectSpans(xSpans(linesOf(host, 1)), carriedGap[1]!);
+
+        renderer.bridgeGapClearance = 3;
+
+        expectSpans(xSpans(linesOf(host, 0)), [[0, 99 - (P + 3)]]);
+        expectSpans(xSpans(linesOf(host, 1)), [[99 + P + 3, 200]]);
+    });
+
+    it('redraws nothing when the clearance is unchanged', () => {
+        const { graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        layCrossing(graph);
+        const redraw = spyOn(renderer as any, '_redrawLineSegment');
+
+        renderer.bridgeGapClearance = 0.5;
+        expect(redraw).not.toHaveBeenCalled();
+
+        renderer.bridgeGapClearance = 3;
+        const redrawn = redraw.mock.calls.length;
+        expect(redrawn).toBe(2);
+        renderer.bridgeGapClearance = 3;
+        renderer.bridgeGapClearance = Number.NaN;
+        expect(redraw.mock.calls).toHaveLength(redrawn);
+    });
+
+    it('keeps the clearance across render-style switches', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h } = layCrossing(graph);
+
+        renderer.bridgeGapClearance = 2;
+        renderer.renderStyle = 'rails';
+        renderer.renderStyle = 'centerline';
+
+        expect(renderer.bridgeGapClearance).toBe(2);
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - (P + 2)],
+            [50 + (P + 2), 100],
+        ]);
+    });
+
+    it('uses a clearance set in detailed once a line style is chosen', () => {
+        const { host, graph, renderer } = scene();
+        const { h } = layCrossing(graph);
+
+        renderer.bridgeGapClearance = 2;
+        renderer.renderStyle = 'centerline';
+
+        expectSpans(xSpans(linesOf(host, h)), [
+            [0, 50 - (P + 2)],
+            [50 + (P + 2), 100],
+        ]);
+    });
+
+    it('clamps the clearance and ignores a non-number', () => {
+        const { renderer } = scene();
+        expect(renderer.bridgeGapClearance).toBe(0.5);
+
+        renderer.bridgeGapClearance = -1;
+        expect(renderer.bridgeGapClearance).toBe(0);
+        renderer.bridgeGapClearance = Number.POSITIVE_INFINITY;
+        expect(renderer.bridgeGapClearance).toBe(0);
+        renderer.bridgeGapClearance = 99;
+        expect(renderer.bridgeGapClearance).toBe(25);
+        renderer.bridgeGapClearance = Number.NaN;
+        expect(renderer.bridgeGapClearance).toBe(25);
+
+        expect(
+            scene({ bridgeGapClearance: 99 }).renderer.bridgeGapClearance
+        ).toBe(25);
+        expect(
+            scene({ bridgeGapClearance: -1 }).renderer.bridgeGapClearance
+        ).toBe(0);
+        expect(
+            scene({ bridgeGapClearance: Number.NaN }).renderer
+                .bridgeGapClearance
+        ).toBe(0.5);
+    });
+
+    it('changes nothing in detailed', () => {
+        const { host, graph, renderer } = scene();
+        layCrossing(graph);
+        const keys = host.bandKeys;
+        expect(keys.length).toBeGreaterThan(0);
+
+        renderer.bridgeGapClearance = 3;
+
+        expect(renderer.bridgeGapClearance).toBe(3);
+        expect(host.bandKeys).toEqual(keys);
     });
 });

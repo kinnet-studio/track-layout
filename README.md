@@ -166,8 +166,10 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       shadows, catenary masts and tunnel walls and cuttings. They draw a
       bridge (parapets and wings) where track crosses at least 3 m over
       other track, which is cut beneath it, and underground track as
-      lighter, broken lines with a portal where it reaches the surface.
-      Highlights and snap dots are drawn as in `'detailed'`.
+      lighter, broken lines with a portal where it reaches the surface. A
+      deck or gap near a joint carries on across it, onto every segment
+      there (all the branches at a junction). Highlights and snap dots are
+      drawn as in `'detailed'`.
         - Each segment's `lineStyle` (`{ preset?, pattern?, color?, width? }`,
           saved with the layout) changes how the line styles draw it.
           Presets are `tunnel` (drawn and treated as underground), `bridge`
@@ -180,6 +182,10 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
                 lineStyle: { preset: 'planned', color: 0x2266cc },
             });
             ```
+
+        - `bridgeGapClearance` (option and property): how far, in metres, a
+          gap reaches past the upper track's parapets; 0.5 by default, from
+          0 to 25.
     - `StationRenderSystem` and `TrackAlignedPlatformRenderSystem`:
       `'detailed'` (the default) or `'outline'`, which outlines each
       platform. The two platforms that make up an island are outlined

@@ -106,6 +106,15 @@ type LineTrackRecord = {
 /** What a segment's crossings put on it, and who crosses it. */
 type CrossingMarks = { marks: CrossingMark[]; partners: Set<number> };
 
+/**
+ * `metres` clamped to 0 to `MAX_MARK_HALF_LENGTH`, the most a mark can reach,
+ * or `fallback` when it isn't a finite number.
+ */
+const clampGapClearance = (metres: unknown, fallback: number): number =>
+    typeof metres === 'number' && Number.isFinite(metres)
+        ? Math.min(MAX_MARK_HALF_LENGTH, Math.max(0, metres))
+        : fallback;
+
 /** Whether a segment's ends can get a portal or wings, which depend on what meets them. */
 const hasRunEnds = (lineStyle: TrackLineStyle | undefined): boolean =>
     lineStyle?.preset === 'tunnel' || lineStyle?.preset === 'bridge';
@@ -229,6 +238,14 @@ export type TrackRenderSystemOptions = {
     curveCreation?: CurveCreationPreviewSource;
     duplicateToSide?: DuplicateToSidePreviewSource;
     catenaryLayout?: CatenaryLayoutPreviewSource;
+    /**
+     * How far, in metres, a gap in the lower track at a bridge reaches past
+     * the upper track's parapets, in the `centerline` and `rails` styles.
+     * Defaults to 0.5 and is clamped to 0 to 25; a value that isn't a finite
+     * number is ignored. It can be changed later through the renderer's
+     * `bridgeGapClearance` property.
+     */
+    bridgeGapClearance?: number;
 };
 
 /**
@@ -307,6 +324,9 @@ export class TrackRenderSystem {
     private _showElevationGradient: boolean = false;
 
     private _renderStyle: TrackRenderStyle = 'detailed';
+
+    /** Metres a gap reaches past the upper track's parapets, in the line styles. */
+    private _bridgeGapClearance: number = GAP_CLEARANCE;
 
     /** Catenary pole containers keyed by draw data key. */
     private _catenaryMap: Map<string, Container> = new Map();
@@ -410,6 +430,10 @@ export class TrackRenderSystem {
         const { curveCreation, duplicateToSide, catenaryLayout } = options;
         this._worldRenderSystem = worldRenderSystem;
         this._terrainData = options.terrain ?? null;
+        this._bridgeGapClearance = clampGapClearance(
+            options.bridgeGapClearance,
+            GAP_CLEARANCE
+        );
         this._topLevelContainer = new Container();
         this._simplifiedTrack = new Container();
 
@@ -631,6 +655,30 @@ export class TrackRenderSystem {
         this._drawExistingTrack();
         this._onPreviewDrawDataChange(this._latestPreviewDrawDataList);
         this._applyZoomLod(this._camera.zoomLevel);
+    }
+
+    /**
+     * How far, in metres, a gap in the lower track at a bridge reaches past
+     * the upper track's parapets, in the `centerline` and `rails` styles.
+     * Defaults to 0.5. A value is clamped to 0 to 25, and one that isn't a
+     * finite number is ignored. Changing it draws the line-style track again
+     * in place. In `detailed`, which has no gaps, it only keeps the value for
+     * the line styles to use.
+     */
+    get bridgeGapClearance(): number {
+        return this._bridgeGapClearance;
+    }
+
+    set bridgeGapClearance(metres: number) {
+        const clearance = clampGapClearance(metres, this._bridgeGapClearance);
+        if (clearance === this._bridgeGapClearance) return;
+        this._bridgeGapClearance = clearance;
+        if (this._renderStyle === 'detailed') return;
+        this._withMarkMemo(() => {
+            for (const curveNumber of this._lineTracks.keys()) {
+                this._redrawLineSegment(curveNumber);
+            }
+        });
     }
 
     private _onZoom(_event: CameraZoomEventPayload, cameraState: CameraState) {
@@ -882,7 +930,7 @@ export class TrackRenderSystem {
                 across,
                 this._terrainData,
                 renderStyle,
-                GAP_CLEARANCE
+                this._bridgeGapClearance
             );
             if (mark !== null) marks.push(mark);
         }
