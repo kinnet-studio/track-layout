@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type { Graphics } from 'pixi.js';
+import type { Graphics, MeshSimple } from 'pixi.js';
 
+import {
+    SAFETY_LINE_U,
+    SAFETY_LINE_WIDTH,
+} from '../src/pixi/platform-texture.js';
 import { StationRenderSystem } from '../src/pixi/station-render-system.js';
 import type { TrackTextureRenderer } from '../src/pixi/track-render-system.js';
 import { createIslandStation } from '../src/stations/station-factory.js';
@@ -13,6 +17,7 @@ import {
     fillsAnything,
     strokedLines,
     textureRenderer,
+    widthsToU,
 } from './pixi-helpers.js';
 import { bareStation } from './station-placement-helpers.js';
 
@@ -60,6 +65,51 @@ describe('StationRenderSystem', () => {
         renderer.addStation(id);
 
         expect(host.bandItem(`station-${id}`)!.children).toHaveLength(0);
+    });
+
+    it('draws the safety line SAFETY_LINE_WIDTH wide, however wide the island', () => {
+        const { graph, host, stations, renderer, id } = scene();
+        const wide = createIslandStation(graph, stations, {
+            position: { x: 0, y: 100 },
+            direction: { x: 1, y: 0 },
+            length: 100,
+            elevation: ELEVATION.GROUND,
+            trackSpacing: 30,
+        });
+
+        for (const station of [id, wide]) {
+            renderer.addStation(station);
+            const meshes = host.bandItem(`station-${station}`)!
+                .children as MeshSimple[];
+            expect(meshes).toHaveLength(2);
+            for (const mesh of meshes) {
+                for (const width of widthsToU(mesh, SAFETY_LINE_U)) {
+                    expect(width).toBeCloseTo(SAFETY_LINE_WIDTH, 4);
+                }
+            }
+        }
+    });
+
+    it('draws the safety line no wider than an island narrower than it', () => {
+        const { graph, host, stations, renderer } = scene();
+        // Halves 0.1 m wide: edges 1.2 m from tracks 2.6 m apart.
+        const narrow = createIslandStation(graph, stations, {
+            position: { x: 0, y: 100 },
+            direction: { x: 1, y: 0 },
+            length: 100,
+            elevation: ELEVATION.GROUND,
+            trackSpacing: 2.6,
+            platformOffset: 1.2,
+        });
+
+        renderer.addStation(narrow);
+
+        for (const mesh of host.bandItem(`station-${narrow}`)!
+            .children as MeshSimple[]) {
+            for (const width of widthsToU(mesh, SAFETY_LINE_U)) {
+                expect(width).toBeCloseTo(0.1, 4);
+            }
+        }
     });
 
     it('draws empty platforms without a texture renderer', () => {
@@ -139,8 +189,7 @@ describe('StationRenderSystem: outline style', () => {
         const lines = strokedLines(station);
         expect(lines.map(line => line.closed)).toEqual([true, true]);
         expect(fillsAnything(station)).toBe(false);
-        // The two halves of the island, 4 m wide each side of the middle,
-        // 1.2 m from tracks 5.2 m either side of it.
+        // The two halves of the island, 4 m wide each side of the middle.
         const extents = lines.map(extent).sort((a, b) => a[2]! - b[2]!);
         const expected = [
             [-50, 50, -4, 0],

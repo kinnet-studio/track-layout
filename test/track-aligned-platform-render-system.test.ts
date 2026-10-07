@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type { Graphics } from 'pixi.js';
+import type { Graphics, MeshSimple } from 'pixi.js';
 
+import {
+    SAFETY_LINE_U,
+    SAFETY_LINE_WIDTH,
+} from '../src/pixi/platform-texture.js';
 import { TrackAlignedPlatformRenderSystem } from '../src/pixi/track-aligned-platform-render-system.js';
 import type { TrackTextureRenderer } from '../src/pixi/track-render-system.js';
 import { StationManager } from '../src/stations/station-manager.js';
@@ -11,6 +15,7 @@ import {
     fillsAnything,
     strokedLines,
     textureRenderer,
+    widthsToU,
 } from './pixi-helpers.js';
 import { layTrack } from './station-placement-helpers.js';
 
@@ -66,6 +71,53 @@ describe('TrackAlignedPlatformRenderSystem', () => {
         expect(host.bandOf(key)).toBe(4);
         expect(host.bandItem(key)!.zIndex).toBe(450);
         expect(host.bandItem(key)!.children).toHaveLength(1);
+    });
+
+    it('draws the safety line SAFETY_LINE_WIDTH wide, however wide the platform', () => {
+        const { host, platforms, renderer, id } = scene();
+        const wide = platforms.createPlatform({
+            stationId: 1,
+            spine: [{ trackSegment: 0, tStart: 0, tEnd: 1, side: 1 }],
+            offset: 2,
+            outerVertices: [
+                { x: 100, y: 30 },
+                { x: 0, y: 30 },
+            ],
+            stopPositions: [],
+        });
+        renderer.removePlatform(wide);
+
+        for (const platform of [id, wide]) {
+            renderer.addPlatform(platform, 0);
+            const [mesh] = host.bandItem(`track-aligned-platform-${platform}`)!
+                .children as MeshSimple[];
+            for (const width of widthsToU(mesh, SAFETY_LINE_U)) {
+                expect(width).toBeCloseTo(SAFETY_LINE_WIDTH, 4);
+            }
+        }
+    });
+
+    it('draws the safety line no wider than a platform narrower than it', () => {
+        const { host, platforms, renderer } = scene();
+        const narrow = platforms.createPlatform({
+            stationId: 1,
+            spine: [{ trackSegment: 0, tStart: 0, tEnd: 1, side: 1 }],
+            offset: 2,
+            outerVertices: [
+                { x: 100, y: 2.1 },
+                { x: 0, y: 2.1 },
+            ],
+            stopPositions: [],
+        });
+        renderer.removePlatform(narrow);
+
+        renderer.addPlatform(narrow, 0);
+
+        const [mesh] = host.bandItem(`track-aligned-platform-${narrow}`)!
+            .children as MeshSimple[];
+        for (const width of widthsToU(mesh, SAFETY_LINE_U)) {
+            expect(width).toBeCloseTo(0.1, 4);
+        }
     });
 
     it('draws nothing without a texture renderer', () => {

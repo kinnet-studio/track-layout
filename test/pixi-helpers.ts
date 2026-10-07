@@ -1,6 +1,12 @@
 import { DefaultBoardCamera } from '@ue-too/board';
 import type { Point } from '@ue-too/math';
-import { type Container, Graphics, Text, Texture } from 'pixi.js';
+import {
+    type Container,
+    Graphics,
+    type MeshSimple,
+    Text,
+    Texture,
+} from 'pixi.js';
 
 import type { ELEVATION } from '../src/index.js';
 import type {
@@ -80,6 +86,39 @@ export function textsIn(container: Container | undefined): string[] {
     if (container === undefined) return [];
     const own = container instanceof Text ? [container.text] : [];
     return [...own, ...container.children.flatMap(textsIn)];
+}
+
+/**
+ * How wide (m) a platform mesh draws the texture from u = 0 to `u`, at
+ * each cross-section: the vertices sharing a v, from the track edge
+ * (u = 0) out to where u reaches `u`, interpolated between vertices.
+ */
+export function widthsToU(mesh: MeshSimple, u: number): number[] {
+    const positions = mesh.geometry.positions;
+    const uvs = mesh.geometry.uvs;
+    const sections = new Map<number, { u: number; x: number; y: number }[]>();
+    for (let i = 0; i < uvs.length / 2; i++) {
+        const v = uvs[i * 2 + 1];
+        const section = sections.get(v) ?? [];
+        section.push({
+            u: uvs[i * 2],
+            x: positions[i * 2],
+            y: positions[i * 2 + 1],
+        });
+        sections.set(v, section);
+    }
+    return [...sections.values()].map(section => {
+        section.sort((a, b) => a.u - b.u);
+        const [edge] = section;
+        const after = section.findIndex(point => point.u >= u);
+        const b = section[after];
+        const a = section[after - 1] ?? b;
+        const t = b.u === a.u ? 1 : (u - a.u) / (b.u - a.u);
+        return Math.hypot(
+            a.x + t * (b.x - a.x) - edge.x,
+            a.y + t * (b.y - a.y) - edge.y
+        );
+    });
 }
 
 /** A camera at zoom 1, which shows the simplified track. */
