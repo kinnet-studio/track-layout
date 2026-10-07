@@ -56,6 +56,7 @@ getCrossings(segmentNumber: number): TrackCrossing[];
     - **Tangential:** an intersection is dropped when the tracks meet at sin θ < `CROSSING_MIN_SIN` (0.02, about 1°). The branches of a junction leave their joint with the same tangent, and their raw hits can land more than a metre from it. Tracks that touch this tangentially aren't crossing.
     - **Shared joint:** when the two segments share a joint *J*, an intersection within `JOINT_TOUCH_DISTANCE` (0.5 m) of *J* is dropped. That covers a joint where the tracks meet at an angle.
     - A real crossing elsewhere between two segments that share a joint is kept.
+- **Duplicates:** refined crossings with the same other segment within `CROSSING_DEDUPE_DISTANCE` (0.5 m) of each other are one crossing; the first is kept. Short segments otherwise split one crossing's raw hits into several clusters.
 - Returns `[]` for a segment that doesn't exist.
 - It doesn't read or change the stored `collision` arrays.
 
@@ -210,20 +211,21 @@ Gaps cut the track lines and parapets, not portals or wings.
 
 ### Sizes
 
-| name                   | value                                    |
-| ---------------------- | ---------------------------------------- |
-| *P* (parapet offset)   | `gauge / 2 + PARAPET_MARGIN` (1.5 m)     |
-| `MARK_LENGTH`          | 1.5 m                                    |
-| `MARK_ANGLE`           | 45°                                      |
-| `DECK_CLEARANCE`       | 1.5 m                                    |
-| `GAP_CLEARANCE`        | 0.5 m                                    |
-| `MAX_MARK_HALF_LENGTH` | 25 m                                     |
-| `CROSSING_MERGE_T`     | 0.05                                     |
-| `JOINT_TOUCH_DISTANCE` | 0.5 m                                    |
-| `CROSSING_MIN_SIN`     | 0.02                                     |
-| `MAX_PATTERN_REPEATS`  | 4000                                     |
-| `UNDERGROUND_LIGHTEN`  | 0.5                                      |
-| `RESTROKE_ZOOM_STEP`   | √2                                       |
+| name                       | value                                |
+| -------------------------- | ------------------------------------ |
+| *P* (parapet offset)       | `gauge / 2 + PARAPET_MARGIN` (1.5 m) |
+| `MARK_LENGTH`              | 1.5 m                                |
+| `MARK_ANGLE`               | 45°                                  |
+| `DECK_CLEARANCE`           | 1.5 m                                |
+| `GAP_CLEARANCE`            | 0.5 m                                |
+| `MAX_MARK_HALF_LENGTH`     | 25 m                                 |
+| `CROSSING_MERGE_T`         | 0.05                                 |
+| `JOINT_TOUCH_DISTANCE`     | 0.5 m                                |
+| `CROSSING_MIN_SIN`         | 0.02                                 |
+| `CROSSING_DEDUPE_DISTANCE` | 0.5 m                                |
+| `MAX_PATTERN_REPEATS`      | 4000                                 |
+| `UNDERGROUND_LIGHTEN`      | 0.5                                  |
+| `RESTROKE_ZOOM_STEP`       | √2                                   |
 
 ## Renderer integration (`TrackRenderSystem`, line styles only)
 

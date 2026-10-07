@@ -49,6 +49,8 @@ const CROSSING_MERGE_T = 0.05;
 const JOINT_TOUCH_DISTANCE = 0.5;
 /** Tracks that meet at a sine of the angle below this are touching, not crossing. */
 const CROSSING_MIN_SIN = 0.02;
+/** Refined crossings of one other segment this close are one crossing. */
+const CROSSING_DEDUPE_DISTANCE = 0.5;
 
 /**
  * Newton's method on `a.get(t) - b.get(u) = 0`, starting from `(t, u)`. The
@@ -444,6 +446,7 @@ export class TrackCurveManager {
                 }
             }
 
+            const refined: { t: number; otherT: number; point: Point }[] = [];
             for (const members of clusters) {
                 const meanT =
                     members.reduce((sum, hit) => sum + hit.t, 0) /
@@ -484,11 +487,29 @@ export class TrackCurveManager {
                     continue;
                 }
 
-                crossings.push({
-                    otherSegment: other.trackSegmentNumber,
-                    t,
-                    otherT,
-                });
+                refined.push({ t, otherT, point });
+            }
+
+            // On a short segment the raw hits of one crossing can fall into
+            // several clusters that refine to the same root, so crossings
+            // that close are one, and the first in `t` order is kept.
+            const kept: typeof refined = [];
+            for (const crossing of refined.sort((a, b) => a.t - b.t)) {
+                const duplicate = kept.some(
+                    earlier =>
+                        PointCal.distanceBetweenPoints(
+                            earlier.point,
+                            crossing.point
+                        ) < CROSSING_DEDUPE_DISTANCE
+                );
+                if (!duplicate) {
+                    kept.push(crossing);
+                    crossings.push({
+                        otherSegment: other.trackSegmentNumber,
+                        t: crossing.t,
+                        otherT: crossing.otherT,
+                    });
+                }
             }
         }
         return crossings.sort((a, b) => a.t - b.t);

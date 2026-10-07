@@ -62,6 +62,38 @@ describe('getCrossings', () => {
         });
     });
 
+    it('reports a crossing once on a short segment, at 90 degrees', () => {
+        const graph = new TrackGraph();
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 6, y: 0 });
+        const v = layLine(
+            graph,
+            { x: 3, y: -3 },
+            { x: 3, y: 3 },
+            ELEVATION.ABOVE_1
+        );
+        const crossings = cm(graph).getCrossings(h);
+        expect(crossings).toHaveLength(1);
+        expect(crossings[0]!.otherSegment).toBe(v);
+        expect(crossings[0]!.t).toBeCloseTo(0.5, 6);
+        expect(crossings[0]!.otherT).toBeCloseTo(0.5, 6);
+    });
+
+    it('reports a crossing once on a short segment, at 45 degrees', () => {
+        const graph = new TrackGraph();
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 10, y: 0 });
+        const d = layLine(
+            graph,
+            { x: 0, y: -5 },
+            { x: 10, y: 5 },
+            ELEVATION.ABOVE_1
+        );
+        const crossings = cm(graph).getCrossings(h);
+        expect(crossings).toHaveLength(1);
+        expect(crossings[0]!.otherSegment).toBe(d);
+        expect(crossings[0]!.t).toBeCloseTo(0.5, 6);
+        expect(crossings[0]!.otherT).toBeCloseTo(0.5, 6);
+    });
+
     it('ignores a continuation and the branches of a junction', () => {
         const graph = new TrackGraph();
         const east = { x: 1, y: 0 };
@@ -74,6 +106,7 @@ describe('getCrossings', () => {
         expect(graph.connectJoints(a!, b!, [{ x: 50, y: 0 }])).toBe(true);
         expect(graph.connectJoints(b!, c!, [{ x: 150, y: 0 }])).toBe(true);
         expect(graph.connectJoints(b!, d!, [{ x: 150, y: 0 }])).toBe(true);
+        expect([...cm(graph).livingEntities]).toHaveLength(3);
         for (const n of cm(graph).livingEntities) {
             expect(cm(graph).getCrossings(n)).toEqual([]);
         }
