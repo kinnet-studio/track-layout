@@ -36,6 +36,57 @@ import {
     trackSegmentDrawDataInsertIndex,
 } from './utils.js';
 
+/** Where another segment crosses this one. `t` and `otherT` are Bezier parameters. */
+export type TrackCrossing = {
+    otherSegment: number;
+    t: number;
+    otherT: number;
+};
+
+/** Raw intersection hits this close in both `t` and `otherT` are one crossing. */
+const CROSSING_MERGE_T = 0.05;
+/** A crossing this close to a joint the two segments share is a touch, not a crossing. */
+const JOINT_TOUCH_DISTANCE = 0.5;
+/** Tracks that meet at a sine of the angle below this are touching, not crossing. */
+const CROSSING_MIN_SIN = 0.02;
+
+/**
+ * Newton's method on `a.get(t) - b.get(u) = 0`, starting from `(t, u)`. The
+ * starting point is returned when the curves are parallel there or the
+ * iteration leaves [0, 1].
+ */
+function refineCrossing(
+    a: BCurve,
+    b: BCurve,
+    t: number,
+    u: number
+): { t: number; u: number } {
+    let [nextT, nextU] = [t, u];
+    for (let i = 0; i < 8; i++) {
+        const p = a.get(nextT);
+        const q = b.get(nextU);
+        const da = a.derivative(nextT);
+        const db = b.derivative(nextU);
+        // da * dt - db * du = q - p, by Cramer's rule
+        const det = da.y * db.x - da.x * db.y;
+        if (Math.abs(det) < 1e-12) {
+            return { t, u };
+        }
+        const [rx, ry] = [q.x - p.x, q.y - p.y];
+        const dt = (db.x * ry - db.y * rx) / det;
+        const du = (da.x * ry - da.y * rx) / det;
+        nextT += dt;
+        nextU += du;
+        if (nextT < 0 || nextT > 1 || nextU < 0 || nextU > 1) {
+            return { t, u };
+        }
+        if (Math.abs(dt) < 1e-9 && Math.abs(du) < 1e-9) {
+            break;
+        }
+    }
+    return { t: nextT, u: nextU };
+}
+
 export class TrackCurveManager {
     private _internalTrackCurveManager: GenericEntityManager<{
         segment: TrackSegmentWithCollision;
@@ -347,6 +398,131 @@ export class TrackCurveManager {
             });
 
         return collisions;
+    }
+
+    /**
+     * Where other segments cross segment `segmentNumber`, sorted by `t`.
+     * Segments that only touch it, at a shared joint or along a tangent, are
+     * not crossings. Returns `[]` for a segment that doesn't exist.
+     */
+    getCrossings(segmentNumber: number): TrackCrossing[] {
+        const entity = this._internalTrackCurveManager.getEntity(segmentNumber);
+        if (entity === null) {
+            return [];
+        }
+        const { curve, t0Joint, t1Joint } = entity.segment;
+        const aabb = curve.AABB;
+        const candidates = this._internalRTree.search(
+            new Rectangle(aabb.min.x, aabb.min.y, aabb.max.x, aabb.max.y)
+        );
+
+        const crossings: TrackCrossing[] = [];
+        for (const other of candidates) {
+            if (other.trackSegmentNumber === segmentNumber) {
+                continue;
+            }
+            const hits = curve
+                .getCurveIntersections(other.curve)
+                .map(hit => ({ t: hit.selfT, otherT: hit.otherT }))
+                .sort((a, b) => a.t - b.t);
+
+            // `getCurveIntersections` is approximate, so one crossing comes
+            // back as several nearby hits. Each cluster is measured against
+            // its first hit.
+            const clusters: { t: number; otherT: number }[][] = [];
+            for (const hit of hits) {
+                const cluster = clusters.find(
+                    members =>
+                        Math.abs(hit.t - members[0]!.t) <= CROSSING_MERGE_T &&
+                        Math.abs(hit.otherT - members[0]!.otherT) <=
+                            CROSSING_MERGE_T
+                );
+                if (cluster === undefined) {
+                    clusters.push([hit]);
+                } else {
+                    cluster.push(hit);
+                }
+            }
+
+            for (const members of clusters) {
+                const meanT =
+                    members.reduce((sum, hit) => sum + hit.t, 0) /
+                    members.length;
+                const meanOtherT =
+                    members.reduce((sum, hit) => sum + hit.otherT, 0) /
+                    members.length;
+                const { t, u: otherT } = refineCrossing(
+                    curve,
+                    other.curve,
+                    meanT,
+                    meanOtherT
+                );
+
+                const tangent = PointCal.unitVector(curve.derivative(t));
+                const otherTangent = PointCal.unitVector(
+                    other.curve.derivative(otherT)
+                );
+                const sin =
+                    tangent.x * otherTangent.y - tangent.y * otherTangent.x;
+                if (Math.abs(sin) < CROSSING_MIN_SIN) {
+                    continue;
+                }
+
+                const point = curve.get(t);
+                const touchesSharedJoint = (
+                    [
+                        [t0Joint, 0],
+                        [t1Joint, 1],
+                    ] as const
+                ).some(
+                    ([joint, endT]) =>
+                        (other.t0Joint === joint || other.t1Joint === joint) &&
+                        PointCal.distanceBetweenPoints(point, curve.get(endT)) <
+                            JOINT_TOUCH_DISTANCE
+                );
+                if (touchesSharedJoint) {
+                    continue;
+                }
+
+                crossings.push({
+                    otherSegment: other.trackSegmentNumber,
+                    t,
+                    otherT,
+                });
+            }
+        }
+        return crossings.sort((a, b) => a.t - b.t);
+    }
+
+    /**
+     * The segments with an end at joint `jointNumber`, which sits at
+     * `position`, in ascending order. It takes the position so that it stays
+     * an R-tree lookup, and still works after a segment has been removed.
+     */
+    getSegmentsAtJoint(jointNumber: number, position: Point): number[] {
+        const box = new Rectangle(
+            position.x - 0.5,
+            position.y - 0.5,
+            position.x + 0.5,
+            position.y + 0.5
+        );
+        // A segment near `position` that ends at the joint somewhere else
+        // doesn't count, so the end itself has to be in the box.
+        const inBox = (point: Point) =>
+            point.x >= box.minX &&
+            point.x <= box.maxX &&
+            point.y >= box.minY &&
+            point.y <= box.maxY;
+        const found = new Set<number>();
+        for (const entry of this._internalRTree.search(box)) {
+            if (
+                (entry.t0Joint === jointNumber && inBox(entry.curve.get(0))) ||
+                (entry.t1Joint === jointNumber && inBox(entry.curve.get(1)))
+            ) {
+                found.add(entry.trackSegmentNumber);
+            }
+        }
+        return [...found].sort((a, b) => a - b);
     }
 
     onTrackSegmentEdge(position: Point): ProjectionInfo | null {
