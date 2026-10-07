@@ -1049,6 +1049,14 @@ describe('markSpan', () => {
 });
 
 describe('carrySpan', () => {
+    it('carries the shared sides onto a neighbour', () => {
+        const shared = { positive: true, negative: false };
+        expect(carrySpan('deck', 2, 100, 'start', shared).span.shared).toEqual(
+            shared
+        );
+        expect(carrySpan('deck', 2, 100, 'start').span.shared).toBeUndefined();
+    });
+
     it('carries an overflow onto the start or end of a neighbour, with a wing at the far side', () => {
         expect(carrySpan('deck', 2, 100, 'start')).toEqual({
             span: {
@@ -1157,6 +1165,100 @@ describe('buildLineTrack with spans', () => {
             expect(p.points[0]!.x).toBeCloseTo(95 - W, 6);
             expect(p.points.at(-1)!.x).toBeCloseTo(100, 6);
         }
+    });
+
+    it('leaves out the parapet on a shared side', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    {
+                        kind: 'deck',
+                        from: 47,
+                        to: 53,
+                        wings: { start: true, end: true },
+                        shared: { positive: true, negative: false },
+                    },
+                ],
+            })
+        );
+
+        const [parapet, ...rest] = parapets(drawing.strokes);
+        expect(rest).toHaveLength(0);
+        expect(parapet!.points[1]!.y).toBeCloseTo(-P, 6);
+        expect(parapet!.points[0]!.x).toBeCloseTo(47 - W, 6);
+        expect(parapet!.points.at(-1)!.x).toBeCloseTo(53 + W, 6);
+    });
+
+    it('draws no parapets on a deck shared on both sides', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    {
+                        kind: 'deck',
+                        from: 47,
+                        to: 53,
+                        wings: { start: true, end: true },
+                        shared: { positive: true, negative: true },
+                    },
+                ],
+            })
+        );
+
+        expect(parapets(drawing.strokes)).toHaveLength(0);
+        expectSpans(xSpans(drawing.strokes), [[0, 100]]);
+    });
+
+    it('draws a shared side only where no shared span covers it', () => {
+        const drawing = buildLineTrack(
+            input({
+                marks: [
+                    {
+                        kind: 'deck',
+                        from: 40,
+                        to: 50,
+                        wings: { start: true, end: true },
+                        shared: { positive: true, negative: false },
+                    },
+                    {
+                        kind: 'deck',
+                        from: 45,
+                        to: 60,
+                        wings: { start: true, end: true },
+                    },
+                ],
+            })
+        );
+
+        const found = parapets(drawing.strokes);
+        expect(found).toHaveLength(2);
+        const negative = found.find(s => s.points[1]!.y < 0)!;
+        expect(negative.points[0]!.x).toBeCloseTo(40 - W, 6);
+        expect(negative.points.at(-1)!.x).toBeCloseTo(60 + W, 6);
+        const positive = found.find(s => s.points[1]!.y > 0)!;
+        expectPoint(positive.points[0], 50, P);
+        expect(positive.points.at(-1)!.x).toBeCloseTo(60 + W, 6);
+    });
+
+    it('draws the same with no side shared', () => {
+        const deck = {
+            kind: 'deck' as const,
+            from: 47,
+            to: 53,
+            wings: { start: true, end: true },
+        };
+
+        expect(
+            buildLineTrack(
+                input({
+                    marks: [
+                        {
+                            ...deck,
+                            shared: { positive: false, negative: false },
+                        },
+                    ],
+                })
+            )
+        ).toEqual(buildLineTrack(input({ marks: [deck] })));
     });
 });
 
