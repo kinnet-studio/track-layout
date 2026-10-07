@@ -2,10 +2,14 @@ import { BCurve } from '@ue-too/curve';
 import { describe, expect, it } from 'bun:test';
 
 import {
+    type CrossingSide,
     type LineStroke,
     type LineTrackInput,
     buildLineTrack,
+    classifyCrossing,
+    crossingMark,
     lightenColor,
+    needsRunEndMark,
     patternIntervals,
     resolveLineStyle,
     sampleLine,
@@ -62,6 +66,44 @@ const dashSpans = (from: number, to: number): [number, number][] => {
 
 const GREY = 0x808080;
 const BLACK = 0x000000;
+
+const V = new BCurve([
+    { x: 50, y: -50 },
+    { x: 50, y: 0 },
+    { x: 50, y: 50 },
+]);
+/** A straight track through (50, 0) at `deg` degrees to STRAIGHT. */
+const at = (deg: number) => {
+    const r = (deg * Math.PI) / 180;
+    const [c, s] = [Math.cos(r), Math.sin(r)];
+    return new BCurve([
+        { x: 50 - 50 * c, y: -50 * s },
+        { x: 50, y: 0 },
+        { x: 50 + 50 * c, y: 50 * s },
+    ]);
+};
+const side = (
+    curve: BCurve,
+    height: number,
+    o: Partial<CrossingSide> = {}
+): CrossingSide => ({
+    curve,
+    t: 0.5,
+    gauge: 1.067,
+    heights: { from: height, to: height },
+    ...o,
+});
+/** The strokes that run along a parapet: those with a point at ±P. */
+const parapets = (strokes: LineStroke[]) =>
+    strokes.filter(s => s.points.some(p => Math.abs(Math.abs(p.y) - P) < 1e-6));
+const expectPoint = (
+    actual: { x: number; y: number } | undefined,
+    x: number,
+    y: number
+) => {
+    expect(actual!.x).toBeCloseTo(x, 6);
+    expect(actual!.y).toBeCloseTo(y, 6);
+};
 
 describe('line style', () => {
     it('resolves each preset, with set fields winning', () => {
@@ -202,6 +244,24 @@ describe('buildLineTrack', () => {
         expect(drawing.strokes).toHaveLength(7);
     });
 
+    it('puts a ground crossing between two samples at the interpolated point', () => {
+        // The height crosses 0 at t = 10 / 22, between the samples at x = 44 and 46.
+        const drawing = buildLineTrack(
+            input({ heights: { from: -10, to: 12 } })
+        );
+        const x = 1000 / 22;
+        const portals = drawing.strokes.filter(s => isPortalAt(s, x));
+        expect(portals).toHaveLength(1);
+        expect(portals[0]!.color).toBe(BLACK);
+        const black = drawing.strokes.filter(
+            s => s.color === BLACK && !isPortalAt(s, x)
+        );
+        expectSpans(xSpans(black), [[x, 100]]);
+        // The last dash, [40, 46], stops at the crossing.
+        const grey = drawing.strokes.filter(s => s.color === GREY);
+        expectSpans(xSpans(grey), [...dashSpans(0, 40), [40, x]]);
+    });
+
     it('uses the terrain', () => {
         const buried = buildLineTrack(
             input({ terrain: { getHeight: () => 5 } })
@@ -288,6 +348,465 @@ describe('buildLineTrack', () => {
                     Math.abs(Math.abs(s.points[1]!.y) - P) < 1e-6
             )
         ).toBe(false);
+    });
+});
+
+describe('classifyCrossing', () => {
+    it('classifies crossings', () => {
+        expect(classifyCrossing(side(STRAIGHT, 0), side(V, 10), null)).toBe(
+            'under'
+        );
+        expect(classifyCrossing(side(V, 10), side(STRAIGHT, 0), null)).toBe(
+            'over'
+        );
+        expect(classifyCrossing(side(STRAIGHT, 0), side(V, 2), null)).toBe(
+            'level'
+        );
+        expect(classifyCrossing(side(STRAIGHT, -10), side(V, 0), null)).toBe(
+            'buried'
+        );
+        const tunnel = { preset: 'tunnel' } as const;
+        expect(
+            classifyCrossing(
+                side(V, 10, { lineStyle: tunnel }),
+                side(STRAIGHT, 0),
+                null
+            )
+        ).toBe('buried');
+        expect(
+            classifyCrossing(
+                side(STRAIGHT, 0),
+                side(V, 10, { lineStyle: tunnel }),
+                null
+            )
+        ).toBe('buried');
+        const ground = { getHeight: () => 5 };
+        expect(classifyCrossing(side(STRAIGHT, 0), side(V, 10), ground)).toBe(
+            'buried'
+        );
+        const ramp = side(STRAIGHT, 0, { heights: { from: 0, to: 20 } });
+        expect(classifyCrossing(ramp, side(V, 10), null)).toBe('level');
+    });
+
+    it('needs the full vertical clearance to separate a crossing', () => {
+        expect(classifyCrossing(side(STRAIGHT, 0), side(V, 2.9), null)).toBe(
+            'level'
+        );
+        expect(classifyCrossing(side(STRAIGHT, 0), side(V, 3), null)).toBe(
+            'under'
+        );
+        expect(classifyCrossing(side(V, 3), side(STRAIGHT, 0), null)).toBe(
+            'over'
+        );
+    });
+});
+
+describe('crossingMark', () => {
+    it('sizes a deck and a gap at 90°', () => {
+        const deck = crossingMark(
+            side(V, 10),
+            side(STRAIGHT, 0, { gauge: 1.435 }),
+            null,
+            'centerline'
+        );
+        expect(deck!.kind).toBe('deck');
+        expect(deck!.s).toBeCloseTo(50, 6);
+        expect(deck!.halfLength).toBeCloseTo(1.435 / 2 + 1.5, 6);
+
+        for (const renderStyle of ['centerline', 'rails'] as const) {
+            const gap = crossingMark(
+                side(STRAIGHT, 0),
+                side(V, 10),
+                null,
+                renderStyle
+            );
+            expect(gap!.kind).toBe('gap');
+            expect(gap!.s).toBeCloseTo(50, 6);
+            expect(gap!.halfLength).toBeCloseTo(P + 0.5, 6);
+        }
+    });
+
+    it('sizes a deck and a gap at 30°, and caps a shallow one', () => {
+        const deck = crossingMark(
+            side(at(30), 10),
+            side(STRAIGHT, 0),
+            null,
+            'centerline'
+        );
+        expect(deck!.kind).toBe('deck');
+        expect(deck!.halfLength).toBeCloseTo(
+            (1.067 / 2 + 1.5) / 0.5 + P * Math.sqrt(3),
+            6
+        );
+
+        const gap = crossingMark(
+            side(STRAIGHT, 0),
+            side(at(30), 10),
+            null,
+            'rails'
+        );
+        expect(gap!.kind).toBe('gap');
+        expect(gap!.halfLength).toBeCloseTo(
+            (P + 0.5) / 0.5 + (1.067 / 2) * Math.sqrt(3),
+            6
+        );
+
+        const shallowDeck = crossingMark(
+            side(at(1), 10),
+            side(STRAIGHT, 0),
+            null,
+            'centerline'
+        );
+        const shallowGap = crossingMark(
+            side(STRAIGHT, 0),
+            side(at(1), 10),
+            null,
+            'centerline'
+        );
+        expect(shallowDeck!.halfLength).toBe(25);
+        expect(shallowGap!.halfLength).toBe(25);
+    });
+
+    it("measures a gap from the track's outermost line", () => {
+        // At 30°, a gap is (P_upper + 0.5) / sin + r * cot, with r the
+        // outermost line's offset: 0, g / 2, or P under a bridge preset.
+        const cut = (
+            renderStyle: 'centerline' | 'rails',
+            lineStyle?: CrossingSide['lineStyle']
+        ) =>
+            crossingMark(
+                side(STRAIGHT, 0, { lineStyle }),
+                side(at(30), 10),
+                null,
+                renderStyle
+            )!.halfLength;
+        const base = (P + 0.5) / 0.5;
+        expect(cut('centerline')).toBeCloseTo(base, 6);
+        expect(cut('rails')).toBeCloseTo(base + (1.067 / 2) * Math.sqrt(3), 6);
+        for (const renderStyle of ['centerline', 'rails'] as const) {
+            expect(cut(renderStyle, { preset: 'bridge' })).toBeCloseTo(
+                base + P * Math.sqrt(3),
+                6
+            );
+        }
+    });
+
+    it("leaves level and buried crossings, and a bridge preset's deck, unmarked", () => {
+        expect(
+            crossingMark(side(V, 2), side(STRAIGHT, 0), null, 'centerline')
+        ).toBeNull();
+        expect(
+            crossingMark(side(V, 10), side(STRAIGHT, -10), null, 'centerline')
+        ).toBeNull();
+        expect(
+            crossingMark(
+                side(V, 10, { lineStyle: { preset: 'bridge' } }),
+                side(STRAIGHT, 0),
+                null,
+                'centerline'
+            )
+        ).toBeNull();
+
+        const gap = crossingMark(
+            side(STRAIGHT, 0, { lineStyle: { preset: 'bridge' } }),
+            side(V, 10),
+            null,
+            'centerline'
+        );
+        expect(gap!.kind).toBe('gap');
+        expect(gap!.halfLength).toBeCloseTo(P + 0.5, 6);
+    });
+});
+
+describe('needsRunEndMark', () => {
+    it('decides run-end marks', () => {
+        const tunnel = { preset: 'tunnel' } as const;
+        const bridge = { preset: 'bridge' } as const;
+        expect(needsRunEndMark(tunnel, false, [])).toBe(true);
+        expect(needsRunEndMark(tunnel, false, [{ underground: false }])).toBe(
+            true
+        );
+        expect(
+            needsRunEndMark(bridge, false, [
+                { lineStyle: undefined, underground: false },
+            ])
+        ).toBe(true);
+
+        expect(needsRunEndMark(tunnel, true, [])).toBe(false);
+        expect(needsRunEndMark(tunnel, false, [{ underground: true }])).toBe(
+            false
+        );
+        expect(
+            needsRunEndMark(bridge, false, [
+                { lineStyle: bridge, underground: false },
+            ])
+        ).toBe(false);
+        expect(needsRunEndMark({ preset: 'planned' }, false, [])).toBe(false);
+        expect(needsRunEndMark(undefined, false, [])).toBe(false);
+    });
+});
+
+describe('buildLineTrack marks', () => {
+    it('cuts a gap in every line', () => {
+        const gap = { kind: 'gap', s: 50, halfLength: 2.5 } as const;
+        const centre = buildLineTrack(input({ marks: [gap] }));
+        expectSpans(xSpans(centre.strokes), [
+            [0, 47.5],
+            [52.5, 100],
+        ]);
+
+        const rails = buildLineTrack(
+            input({ renderStyle: 'rails', marks: [gap] })
+        );
+        expect(rails.strokes).toHaveLength(4);
+        for (const sign of [-1, 1]) {
+            const own = rails.strokes.filter(
+                s => Math.sign(s.points[0]!.y) === sign
+            );
+            expect(own).toHaveLength(2);
+            for (const stroke of own) {
+                for (const p of stroke.points) {
+                    expect(p.y).toBeCloseTo((sign * 1.067) / 2, 9);
+                }
+            }
+            expectSpans(xSpans(own), [
+                [0, 47.5],
+                [52.5, 100],
+            ]);
+        }
+    });
+
+    it('clamps a gap to the segment, and merges gaps that overlap', () => {
+        const ends = buildLineTrack(
+            input({
+                marks: [
+                    { kind: 'gap', s: 1, halfLength: 3 },
+                    { kind: 'gap', s: 99, halfLength: 3 },
+                ],
+            })
+        );
+        expectSpans(xSpans(ends.strokes), [[4, 96]]);
+
+        const overlapping = buildLineTrack(
+            input({
+                marks: [
+                    { kind: 'gap', s: 50, halfLength: 5 },
+                    { kind: 'gap', s: 53, halfLength: 5 },
+                ],
+            })
+        );
+        expectSpans(xSpans(overlapping.strokes), [
+            [0, 45],
+            [58, 100],
+        ]);
+    });
+
+    it('keeps the pattern phase across a gap', () => {
+        const drawing = buildLineTrack(
+            input({
+                lineStyle: { pattern: 'dashed' },
+                marks: [{ kind: 'gap', s: 50, halfLength: 2.5 }],
+            })
+        );
+        // The dash that starts at 50 is cut to start at 52.5; none restart.
+        expectSpans(xSpans(drawing.strokes), [
+            ...dashSpans(0, 50),
+            [52.5, 56],
+            ...dashSpans(60, 100),
+        ]);
+    });
+
+    it('draws a deck as parapets with wings', () => {
+        const drawing = buildLineTrack(
+            input({ marks: [{ kind: 'deck', s: 50, halfLength: 3 }] })
+        );
+        expect(drawing.strokes).toHaveLength(3);
+        expect(drawing.strokes.every(s => s.color === BLACK)).toBe(true);
+        const line = drawing.strokes.filter(s => !parapets([s]).length);
+        expectSpans(xSpans(line), [[0, 100]]);
+
+        const rails = parapets(drawing.strokes);
+        expect(rails).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const rail = rails.find(s => Math.sign(s.points[1]!.y) === sign)!;
+            expectPoint(rail.points[0], 47 - W, sign * (P + W));
+            expectPoint(rail.points[1], 47, sign * P);
+            expectPoint(rail.points.at(-2), 53, sign * P);
+            expectPoint(rail.points.at(-1), 53 + W, sign * (P + W));
+        }
+    });
+
+    it('puts a deck on top of the rails', () => {
+        const drawing = buildLineTrack(
+            input({
+                renderStyle: 'rails',
+                marks: [{ kind: 'deck', s: 50, halfLength: 3 }],
+            })
+        );
+        expect(drawing.strokes).toHaveLength(4);
+        expect(parapets(drawing.strokes)).toHaveLength(2);
+    });
+
+    it('clamps a deck at the segment end, with no wing there', () => {
+        const drawing = buildLineTrack(
+            input({ marks: [{ kind: 'deck', s: 1, halfLength: 3 }] })
+        );
+        const rails = parapets(drawing.strokes);
+        expect(rails).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const rail = rails.find(s => Math.sign(s.points[0]!.y) === sign)!;
+            expectPoint(rail.points[0], 0, sign * P);
+            expectPoint(rail.points.at(-1), 4 + W, sign * (P + W));
+        }
+
+        const far = buildLineTrack(
+            input({ marks: [{ kind: 'deck', s: 99, halfLength: 3 }] })
+        );
+        for (const sign of [-1, 1]) {
+            const rail = parapets(far.strokes).find(
+                s => Math.sign(s.points[1]!.y) === sign
+            )!;
+            expectPoint(rail.points[0], 96 - W, sign * (P + W));
+            expectPoint(rail.points.at(-1), 100, sign * P);
+        }
+    });
+
+    it("draws a bridge preset's parapets along the whole segment", () => {
+        const bridge = { preset: 'bridge' } as const;
+        const winged = buildLineTrack(
+            input({
+                lineStyle: bridge,
+                runEnds: { start: true, end: true },
+            })
+        );
+        expect(winged.strokes).toHaveLength(3);
+        const wingedRails = parapets(winged.strokes);
+        expect(wingedRails).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const rail = wingedRails.find(
+                s => Math.sign(s.points[1]!.y) === sign
+            )!;
+            expectPoint(rail.points[0], -W, sign * (P + W));
+            expectPoint(rail.points[1], 0, sign * P);
+            expectPoint(rail.points.at(-2), 100, sign * P);
+            expectPoint(rail.points.at(-1), 100 + W, sign * (P + W));
+        }
+
+        const plain = buildLineTrack(
+            input({
+                lineStyle: bridge,
+                runEnds: { start: false, end: false },
+            })
+        );
+        for (const sign of [-1, 1]) {
+            const rail = parapets(plain.strokes).find(
+                s => Math.sign(s.points[0]!.y) === sign
+            )!;
+            expectPoint(rail.points[0], 0, sign * P);
+            expectPoint(rail.points.at(-1), 100, sign * P);
+        }
+
+        // Without `runEnds`, neither end gets a wing.
+        const open = buildLineTrack(input({ lineStyle: bridge }));
+        expect(parapets(open.strokes)).toHaveLength(2);
+        for (const sign of [-1, 1]) {
+            const rail = parapets(open.strokes).find(
+                s => Math.sign(s.points[0]!.y) === sign
+            )!;
+            expectPoint(rail.points[0], 0, sign * P);
+            expectPoint(rail.points.at(-1), 100, sign * P);
+        }
+
+        const cut = buildLineTrack(
+            input({
+                lineStyle: bridge,
+                runEnds: { start: true, end: true },
+                marks: [{ kind: 'gap', s: 50, halfLength: 2.5 }],
+            })
+        );
+        const pieces = parapets(cut.strokes);
+        expect(pieces).toHaveLength(4);
+        for (const sign of [-1, 1]) {
+            const own = pieces
+                .filter(s => Math.sign(s.points[1]!.y) === sign)
+                .sort((a, b) => a.points[0]!.x - b.points[0]!.x);
+            expect(own).toHaveLength(2);
+            expectPoint(own[0]!.points[0], -W, sign * (P + W));
+            expectPoint(own[0]!.points.at(-1), 47.5, sign * P);
+            expectPoint(own[1]!.points[0], 52.5, sign * P);
+            expectPoint(own[1]!.points.at(-1), 100 + W, sign * (P + W));
+        }
+    });
+
+    it('draws marks in the colour of the part of the line they sit on', () => {
+        const drawing = buildLineTrack(
+            input({
+                heights: { from: -10, to: 10 },
+                lineStyle: { preset: 'bridge' },
+                runEnds: { start: true, end: true },
+            })
+        );
+        const rails = parapets(drawing.strokes).filter(s => !isPortalAt(s, 50));
+        expect(rails).toHaveLength(4);
+        for (const rail of rails) {
+            const mid = rail.points[2]!;
+            expect(rail.color).toBe(mid.x < 50 ? GREY : BLACK);
+        }
+        const [first] = rails
+            .filter(s => s.color === GREY)
+            .sort((a, b) => a.points[0]!.x - b.points[0]!.x);
+        // The start wing is part of the lighter parapet it begins.
+        expect(first!.points[0]!.x).toBeCloseTo(-W, 6);
+    });
+
+    it("puts a tunnel preset's portals at the run ends asked for", () => {
+        const tunnel = { preset: 'tunnel' } as const;
+        const start = buildLineTrack(
+            input({
+                lineStyle: tunnel,
+                runEnds: { start: true, end: false },
+            })
+        );
+        const black = start.strokes.filter(s => s.color === BLACK);
+        expect(black).toHaveLength(1);
+        expect(isPortalAt(black[0]!, 0)).toBe(true);
+        const [tipA, , , tipB] = black[0]!.points;
+        expectPoint(tipA, -W, -(P + W));
+        expectPoint(tipB, -W, P + W);
+        expect(start.strokes.filter(s => s.color === GREY).length).toBe(10);
+
+        const end = buildLineTrack(
+            input({ lineStyle: tunnel, runEnds: { start: false, end: true } })
+        );
+        const endPortals = end.strokes.filter(s => s.color === BLACK);
+        expect(endPortals).toHaveLength(1);
+        expect(isPortalAt(endPortals[0]!, 100)).toBe(true);
+        expectPoint(endPortals[0]!.points[0], 100 + W, -(P + W));
+        expectPoint(endPortals[0]!.points[3], 100 + W, P + W);
+
+        const both = buildLineTrack(
+            input({ lineStyle: tunnel, runEnds: { start: true, end: true } })
+        );
+        expect(both.strokes.filter(s => s.color === BLACK)).toHaveLength(2);
+    });
+
+    it('ignores run ends for a segment with neither preset', () => {
+        const onCentre = (strokes: LineStroke[]) =>
+            strokes.every(s => s.points.every(p => Math.abs(p.y) < 1e-9));
+        const plain = buildLineTrack(
+            input({ runEnds: { start: true, end: true } })
+        );
+        expect(plain.strokes).toHaveLength(1);
+        expect(onCentre(plain.strokes)).toBe(true);
+
+        const planned = buildLineTrack(
+            input({
+                lineStyle: { preset: 'planned' },
+                runEnds: { start: true, end: true },
+            })
+        );
+        expectSpans(xSpans(planned.strokes), dashSpans(0, 100));
+        expect(onCentre(planned.strokes)).toBe(true);
     });
 });
 

@@ -76,6 +76,7 @@ describe('pixi entry point', () => {
             'getElevationColorRgb',
             'buildLineTrack',
             'resolveLineStyle',
+            'classifyCrossing',
         ]) {
             expect(pixi).not.toHaveProperty(name);
         }

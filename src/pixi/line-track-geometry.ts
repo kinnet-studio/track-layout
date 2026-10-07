@@ -1,6 +1,7 @@
 import type { BCurve } from '@ue-too/curve';
 import { type Point, PointCal } from '@ue-too/math';
 
+import { VERTICAL_CLEARANCE } from '../index.js';
 import type { LinePattern, LinePreset, TrackLineStyle } from '../index.js';
 import type { TerrainSampler } from './tunnel-geometry.js';
 
@@ -42,6 +43,9 @@ export const MAX_PATTERN_REPEATS = 4000;
 
 /** Intervals shorter than this (metres) are floating-point leftovers, not marks. */
 const EMPTY_INTERVAL = 1e-9;
+
+/** Tracks crossing at a sine of the angle below this count as parallel. */
+const PARALLEL_SIN = 1e-6;
 
 /**
  * Pattern lengths in screen pixels at width 1: on, off, on, off... A solid
@@ -221,6 +225,129 @@ export function patternIntervals(
     return intervals;
 }
 
+/** One track at a crossing, as that track sees it. */
+export type CrossingSide = {
+    curve: BCurve;
+    /** Bezier parameter of the crossing on `curve`. */
+    t: number;
+    gauge: number;
+    heights: LineHeights;
+    lineStyle?: TrackLineStyle;
+};
+
+/**
+ * What a crossing is to one of its tracks: `level` when the heights are within
+ * {@link VERTICAL_CLEARANCE} of each other, `buried` when they aren't but either
+ * track is underground there, and otherwise `over` or `under`.
+ */
+export type CrossingKind = 'level' | 'buried' | 'over' | 'under';
+
+/** Classify the crossing of `self` and `other` from `self`'s side. */
+export function classifyCrossing(
+    self: CrossingSide,
+    other: CrossingSide,
+    terrain: TerrainSampler | null
+): CrossingKind {
+    const difference =
+        heightAt(self.heights, self.t) - heightAt(other.heights, other.t);
+    if (Math.abs(difference) < VERTICAL_CLEARANCE) return 'level';
+
+    const point = self.curve.get(self.t);
+    const buried = (side: CrossingSide) =>
+        isUnderground(side.heights, side.t, point, side.lineStyle, terrain);
+    if (buried(self) || buried(other)) return 'buried';
+    return difference > 0 ? 'over' : 'under';
+}
+
+/**
+ * A mark on a segment where another track crosses it: a `deck` where this
+ * track bridges the other, or a `gap` where it passes under. `s` is the arc
+ * length of the crossing and `halfLength` how far the mark reaches each way.
+ */
+export type CrossingMark = {
+    kind: 'deck' | 'gap';
+    s: number;
+    halfLength: number;
+};
+
+/**
+ * The mark a crossing puts on `self`, or null when it needs none: a level or
+ * buried crossing, or the deck of a `bridge` preset, whose parapets already run
+ * the whole segment. A mark is `cot θ` times the offset of its outermost line
+ * longer than at a right angle (a deck's parapets, a gap's track lines or
+ * parapets), so it still covers a skewed crossing, and it is capped at
+ * {@link MAX_MARK_HALF_LENGTH} where the tracks are close to parallel.
+ */
+export function crossingMark(
+    self: CrossingSide,
+    other: CrossingSide,
+    terrain: TerrainSampler | null,
+    renderStyle: 'centerline' | 'rails'
+): CrossingMark | null {
+    const kind = classifyCrossing(self, other, terrain);
+    if (kind === 'level' || kind === 'buried') return null;
+    const bridge = self.lineStyle?.preset === 'bridge';
+    if (kind === 'over' && bridge) return null;
+
+    const a = PointCal.unitVector(self.curve.derivative(self.t));
+    const b = PointCal.unitVector(other.curve.derivative(other.t));
+    const sin = Math.abs(a.x * b.y - a.y * b.x);
+    const cos = Math.abs(a.x * b.x + a.y * b.y);
+
+    let halfLength = MAX_MARK_HALF_LENGTH;
+    if (sin >= PARALLEL_SIN) {
+        const cot = cos / sin;
+        if (kind === 'over') {
+            halfLength =
+                (other.gauge / 2 + DECK_CLEARANCE) / sin +
+                parapetOffset(self.gauge) * cot;
+        } else {
+            const outermost = bridge
+                ? parapetOffset(self.gauge)
+                : renderStyle === 'rails'
+                  ? self.gauge / 2
+                  : 0;
+            halfLength =
+                (parapetOffset(other.gauge) + GAP_CLEARANCE) / sin +
+                outermost * cot;
+        }
+    }
+    return {
+        kind: kind === 'over' ? 'deck' : 'gap',
+        s: self.curve.lengthAtT(self.t),
+        halfLength: Math.min(halfLength, MAX_MARK_HALF_LENGTH),
+    };
+}
+
+/** What a segment sees of another one that meets it at a joint. */
+export type RunEndNeighbour = {
+    lineStyle?: TrackLineStyle;
+    /** Whether that segment is underground at its own end of the joint. */
+    underground: boolean;
+};
+
+/**
+ * Whether a segment's end at a joint gets a portal (`tunnel` preset) or wings
+ * (`bridge` preset). Only the two ends of a run of such segments do: a tunnel
+ * end doesn't when the track is buried there anyway, or when a neighbour is
+ * underground at the joint; a bridge end doesn't when a neighbour is a bridge
+ * too. An end with no neighbours is open, and gets its mark.
+ */
+export function needsRunEndMark(
+    lineStyle: TrackLineStyle | undefined,
+    buriedHere: boolean,
+    neighbours: RunEndNeighbour[]
+): boolean {
+    switch (lineStyle?.preset) {
+        case 'tunnel':
+            return !buriedHere && !neighbours.some(n => n.underground);
+        case 'bridge':
+            return !neighbours.some(n => n.lineStyle?.preset === 'bridge');
+        default:
+            return false;
+    }
+}
+
 export type LineTrackInput = {
     samples: LineSample[];
     heights: LineHeights;
@@ -230,6 +357,13 @@ export type LineTrackInput = {
     terrain: TerrainSampler | null;
     /** Metres per screen pixel: 1 / zoom level. */
     metresPerPixel: number;
+    /** Decks and gaps from the tracks that cross this one. */
+    marks?: CrossingMark[];
+    /**
+     * Whether each end of the segment is an end of its run of `tunnel` or
+     * `bridge` segments, and so gets a portal or wings. Neither when omitted.
+     */
+    runEnds?: { start: boolean; end: boolean };
 };
 
 /** One polyline to stroke. */
@@ -350,6 +484,21 @@ function splitRuns(
     return { runs, crossings };
 }
 
+/**
+ * The outer end of a wing: from the line `offset` metres off centre at `frame`,
+ * `MARK_LENGTH` long at `MARK_ANGLE` to the track, bent away from the centre
+ * line and on along the track in `direction` (+1 toward larger s).
+ */
+function wingTip(frame: LineFrame, offset: number, direction: 1 | -1): Point {
+    const bar = offsetPoint(frame, offset);
+    const along = MARK_LENGTH * Math.cos(MARK_ANGLE) * direction;
+    const across = MARK_LENGTH * Math.sin(MARK_ANGLE) * Math.sign(offset);
+    return {
+        x: bar.x + along * frame.tangent.x + across * frame.normal.x,
+        y: bar.y + along * frame.tangent.y + across * frame.normal.y,
+    };
+}
+
 /** A bar across the track with both ends bent toward the open air. */
 function portalStroke(
     samples: LineSample[],
@@ -359,31 +508,67 @@ function portalStroke(
 ): LineStroke {
     const frame = frameAt(samples, crossing.s);
     const half = parapetOffset(gauge);
-    const along = MARK_LENGTH * Math.cos(MARK_ANGLE) * crossing.side;
-    const across = MARK_LENGTH * Math.sin(MARK_ANGLE);
-    const tip = (offset: number): Point => {
-        const bar = offsetPoint(frame, offset);
-        const sign = Math.sign(offset);
-        return {
-            x: bar.x + along * frame.tangent.x + across * sign * frame.normal.x,
-            y: bar.y + along * frame.tangent.y + across * sign * frame.normal.y,
-        };
-    };
     return {
         points: [
-            tip(-half),
+            wingTip(frame, -half, crossing.side),
             offsetPoint(frame, -half),
             offsetPoint(frame, half),
-            tip(half),
+            wingTip(frame, half, crossing.side),
         ],
         color,
     };
 }
 
+/** The gap marks as arc-length intervals clamped to the segment, sorted and merged. */
+function gapIntervals(
+    marks: CrossingMark[],
+    length: number
+): [number, number][] {
+    const gaps = marks
+        .filter(mark => mark.kind === 'gap')
+        .map((mark): [number, number] => [
+            Math.max(0, mark.s - mark.halfLength),
+            Math.min(length, mark.s + mark.halfLength),
+        ])
+        .filter(([from, to]) => to - from > EMPTY_INTERVAL)
+        .sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    for (const gap of gaps) {
+        const last = merged[merged.length - 1];
+        if (last !== undefined && gap[0] <= last[1]) {
+            last[1] = Math.max(last[1], gap[1]);
+        } else {
+            merged.push([gap[0], gap[1]]);
+        }
+    }
+    return merged;
+}
+
+/** What is left of [`s0`, `s1`] once `gaps` (sorted and disjoint) are cut out. */
+function subtractGaps(
+    s0: number,
+    s1: number,
+    gaps: [number, number][]
+): [number, number][] {
+    const pieces: [number, number][] = [];
+    let from = s0;
+    for (const [gapFrom, gapTo] of gaps) {
+        if (gapTo <= from) continue;
+        if (gapFrom >= s1) break;
+        if (gapFrom - from > EMPTY_INTERVAL) pieces.push([from, gapFrom]);
+        from = Math.max(from, gapTo);
+    }
+    if (s1 - from > EMPTY_INTERVAL) pieces.push([from, s1]);
+    return pieces;
+}
+
 /**
  * The strokes for one segment: its line (one per rail for `rails`) split into
- * above- and below-ground runs, each cut by its pattern, and a portal wherever
- * the track meets the ground.
+ * above- and below-ground runs, each cut by its pattern and by the gaps under
+ * any decks; a portal wherever the track meets the ground; the parapets of a
+ * `bridge` preset and of the decks over other tracks; and the portals of a
+ * `tunnel` preset's run ends. Marks are solid, and take the colour of the run
+ * they sit on, except that portals always take the above-ground colour.
  */
 export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
     const { samples, gauge, renderStyle, metresPerPixel } = input;
@@ -394,34 +579,102 @@ export function buildLineTrack(input: LineTrackInput): LineTrackDrawing {
 
     const length = samples[samples.length - 1]!.s;
     const { runs, crossings } = splitRuns(input, length);
+    const marks = input.marks ?? [];
+    const gaps = gapIntervals(marks, length);
+    const runEnds = input.runEnds ?? { start: false, end: false };
     const offsets = renderStyle === 'rails' ? [-gauge / 2, gauge / 2] : [0];
+    const parapets = [-parapetOffset(gauge), parapetOffset(gauge)];
+    const colorOf = (run: LineRun) =>
+        run.underground
+            ? lightenColor(style.color, UNDERGROUND_LIGHTEN)
+            : style.color;
 
     for (const run of runs) {
         const pattern =
             run.underground && style.pattern === 'solid'
                 ? 'dashed'
                 : style.pattern;
-        const color = run.underground
-            ? lightenColor(style.color, UNDERGROUND_LIGHTEN)
-            : style.color;
+        const color = colorOf(run);
         const lengths = PATTERN_PX[pattern].map(
             px => px * style.width * metresPerPixel
         );
-        const intervals = patternIntervals(run.s0, run.s1, lengths);
         // A run too short to show a dash now may show one at another zoom.
         if (run.s1 > run.s0 && lengths.length > 0) styled = true;
-        for (const offset of offsets) {
-            for (const [from, to] of intervals) {
-                strokes.push({
-                    points: polylineBetween(samples, from, to, offset),
-                    color,
-                });
+        for (const [pieceFrom, pieceTo] of subtractGaps(run.s0, run.s1, gaps)) {
+            const intervals = patternIntervals(pieceFrom, pieceTo, lengths);
+            for (const offset of offsets) {
+                for (const [from, to] of intervals) {
+                    strokes.push({
+                        points: polylineBetween(samples, from, to, offset),
+                        color,
+                    });
+                }
             }
         }
     }
 
     for (const crossing of crossings) {
         strokes.push(portalStroke(samples, crossing, gauge, style.color));
+    }
+
+    if (style.preset === 'bridge') {
+        for (const run of runs) {
+            const color = colorOf(run);
+            for (const [from, to] of subtractGaps(run.s0, run.s1, gaps)) {
+                for (const offset of parapets) {
+                    const points = polylineBetween(samples, from, to, offset);
+                    if (runEnds.start && from === 0) {
+                        points.unshift(
+                            wingTip(frameAt(samples, 0), offset, -1)
+                        );
+                    }
+                    if (runEnds.end && to === length) {
+                        points.push(
+                            wingTip(frameAt(samples, length), offset, 1)
+                        );
+                    }
+                    strokes.push({ points, color });
+                }
+            }
+        }
+    }
+
+    for (const mark of marks) {
+        if (mark.kind !== 'deck') continue;
+        const from = Math.max(0, mark.s - mark.halfLength);
+        const to = Math.min(length, mark.s + mark.halfLength);
+        if (!(to - from > EMPTY_INTERVAL)) continue;
+        const run = runs.find(r => mark.s <= r.s1) ?? runs[runs.length - 1]!;
+        const color = colorOf(run);
+        for (const offset of parapets) {
+            const points = polylineBetween(samples, from, to, offset);
+            // A clamped end stops at the segment's own end, with no wing.
+            if (from > 0) {
+                points.unshift(wingTip(frameAt(samples, from), offset, -1));
+            }
+            if (to < length) {
+                points.push(wingTip(frameAt(samples, to), offset, 1));
+            }
+            strokes.push({ points, color });
+        }
+    }
+
+    if (style.preset === 'tunnel') {
+        if (runEnds.start) {
+            strokes.push(
+                portalStroke(samples, { s: 0, side: -1 }, gauge, style.color)
+            );
+        }
+        if (runEnds.end) {
+            strokes.push(
+                portalStroke(
+                    samples,
+                    { s: length, side: 1 },
+                    gauge,
+                    style.color
+                )
+            );
+        }
     }
 
     return { width: style.width, strokes, styled };
