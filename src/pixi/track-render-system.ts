@@ -1120,9 +1120,10 @@ export class TrackRenderSystem {
      * The spans that the marks of the segments reached from each end of
      * `segment` put on it: what their overflow toward it has left once the
      * segments between are crossed. What is left past the far end gets a wing
-     * there when that end is open. As with its own marks, nothing carries onto
-     * an end where the segment is underground, and no deck onto a `bridge`
-     * segment, whose parapets already run its length.
+     * there when that end is open, and a deck keeps the sides it shares with
+     * a neighbouring deck. As with its own marks, nothing carries onto an end
+     * where the segment is underground, and no deck onto a `bridge` segment,
+     * whose parapets already run its length.
      */
     private _carriedSpans(
         curveNumber: number,
@@ -1161,7 +1162,14 @@ export class TrackRenderSystem {
                             mark.kind,
                             overflow[towards] - distance,
                             length,
-                            enteringAt
+                            enteringAt,
+                            mark.kind === 'deck'
+                                ? this._carriedSharedSides(
+                                      number,
+                                      mark,
+                                      facingStart === (enteringAt === 'end')
+                                  )
+                                : undefined
                         );
                         const far = ends[1 - from]!;
                         if (
@@ -1177,6 +1185,24 @@ export class TrackRenderSystem {
             );
         }
         return spans;
+    }
+
+    /**
+     * The shared sides of the deck `mark` on segment `number`, as seen from a
+     * segment it carries onto: as they are when the two run the same way, and
+     * swapped when they run opposite ways, since each side is named after its
+     * own segment's normal. The joint walk keeps one direction, so they run
+     * the same way exactly when the segment reached faces the walk with its
+     * start while the walk leaves the drawn segment's end, or the reverse.
+     */
+    private _carriedSharedSides(
+        number: number,
+        mark: OwnMark,
+        sameWay: boolean
+    ): MarkSpan['shared'] | undefined {
+        const shared = this._sharedSides(number, mark);
+        if (shared === undefined || sameWay) return shared;
+        return { positive: shared.negative, negative: shared.positive };
     }
 
     /**
