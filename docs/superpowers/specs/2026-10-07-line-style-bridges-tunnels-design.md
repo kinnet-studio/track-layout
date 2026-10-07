@@ -258,6 +258,8 @@ Gaps cut the track lines and parapets, not portals or wings.
 
 - **Package root:**
     - `TrackCrossing`, `TrackLineStyle`, `LinePreset`, `LinePattern`
+    - `LINE_PRESETS` and `LINE_PATTERNS`, the allowed values, for an app's dropdowns
+    - `normalizeLineStyle`, the gate every stored `lineStyle` passes through: it keeps only valid values and clamps `width` to 1 to 8
     - the methods `getCrossings` and `getSegmentsAtJoint`
 - **`track-layout/pixi`:** no new exports. The geometry module is internal, and tests import it from `src/`.
 - **Docs:**

@@ -8,7 +8,10 @@ import {
 } from '../src/tracks/segment-style.js';
 import { type SegmentSplitInfo, TrackGraph } from '../src/tracks/track.js';
 import { TrackCurveManager } from '../src/tracks/trackcurve-manager.js';
-import { validateSerializedTrackData } from '../src/tracks/types.js';
+import {
+    type TrackLineStyle,
+    validateSerializedTrackData,
+} from '../src/tracks/types.js';
 
 const EAST = { x: 1, y: 0 };
 
@@ -69,6 +72,139 @@ describe('applyStylePatch lineStyle', () => {
         expect(applyStylePatch(current, { bed: true }).lineStyle).toEqual(
             current.lineStyle
         );
+    });
+});
+
+describe('line style values the model keeps', () => {
+    /** A style the types forbid, as a caller outside TypeScript could pass it. */
+    const invalid = (value: unknown) => value as unknown as TrackLineStyle;
+    /** The segment's line style after `setSegmentStyle` with `lineStyle`. */
+    function storedAfterSetting(lineStyle: TrackLineStyle | undefined) {
+        const graph = new TrackGraph();
+        const n = layStraight(graph);
+        graph.setSegmentStyle(n, { lineStyle });
+        return { graph, stored: graph.getTrackSegmentWithJoints(n)!.lineStyle };
+    }
+
+    it('clamps a width to 1..8 and still saves a valid layout', () => {
+        const { graph, stored } = storedAfterSetting({ width: 10 });
+        expect(stored).toEqual({ width: 8 });
+        expect(
+            validateSerializedTrackData(
+                JSON.parse(JSON.stringify(graph.serialize()))
+            )
+        ).toEqual({ valid: true });
+        expect(storedAfterSetting({ width: 0.5 }).stored).toEqual({
+            width: 1,
+        });
+        expect(storedAfterSetting({ width: 3 }).stored).toEqual({ width: 3 });
+    });
+
+    it('drops a width that is not a finite number', () => {
+        for (const width of [NaN, Infinity, -Infinity, '2', null]) {
+            expect(
+                storedAfterSetting(invalid({ width })).stored
+            ).toBeUndefined();
+        }
+        expect(
+            storedAfterSetting(invalid({ width: NaN, preset: 'planned' }))
+                .stored
+        ).toEqual({ preset: 'planned' });
+    });
+
+    it('drops a colour that is not an integer from 0 to 0xFFFFFF', () => {
+        for (const color of [-1, 1.5, 0x1000000, NaN, '0xff0000']) {
+            expect(
+                storedAfterSetting(invalid({ color })).stored
+            ).toBeUndefined();
+        }
+        for (const color of [0, 0xffffff]) {
+            expect(storedAfterSetting({ color }).stored).toEqual({ color });
+        }
+    });
+
+    it('drops a preset or pattern it does not know', () => {
+        expect(
+            storedAfterSetting(invalid({ preset: 'viaduct' })).stored
+        ).toBeUndefined();
+        expect(
+            storedAfterSetting(invalid({ pattern: 'wavy' })).stored
+        ).toBeUndefined();
+        expect(
+            storedAfterSetting(
+                invalid({ preset: 'viaduct', pattern: 'dotted' })
+            ).stored
+        ).toEqual({ pattern: 'dotted' });
+    });
+
+    it('drops a key it does not know', () => {
+        const { stored } = storedAfterSetting(
+            invalid({ preset: 'tunnel', foo: 1 })
+        );
+        expect(stored).toEqual({ preset: 'tunnel' });
+        expect('foo' in stored!).toBe(false);
+    });
+
+    it('treats null as unset, through every route', () => {
+        expect(normalizeLineStyle(invalid(null))).toBeUndefined();
+        expect(
+            applyStylePatch(
+                { lineStyle: { preset: 'planned' } },
+                { lineStyle: invalid(null) }
+            ).lineStyle
+        ).toBeUndefined();
+        expect(storedAfterSetting(invalid(null)).stored).toBeUndefined();
+
+        const graph = new TrackGraph();
+        graph.setNewSegmentStyle({ lineStyle: { preset: 'tunnel' } });
+        graph.setNewSegmentStyle({ lineStyle: invalid(null) });
+        expect(graph.newSegmentStyle.lineStyle).toBeUndefined();
+        const n = layStraight(graph);
+        expect(graph.getTrackSegmentWithJoints(n)!.lineStyle).toBeUndefined();
+    });
+
+    it('treats anything that is not an object as unset', () => {
+        for (const value of ['tunnel', 3, true, []]) {
+            expect(normalizeLineStyle(invalid(value))).toBeUndefined();
+        }
+    });
+
+    it('cleans a style given to setNewSegmentStyle', () => {
+        const graph = new TrackGraph();
+        graph.setNewSegmentStyle({
+            lineStyle: invalid({ width: 99, color: -1, preset: 'bridge' }),
+        });
+        expect(graph.newSegmentStyle.lineStyle).toEqual({
+            width: 8,
+            preset: 'bridge',
+        });
+        const n = layStraight(graph);
+        expect(graph.getTrackSegmentWithJoints(n)!.lineStyle).toEqual({
+            width: 8,
+            preset: 'bridge',
+        });
+    });
+
+    it('never lets a "__proto__" key set the copy prototype', () => {
+        const parsed = JSON.parse('{"__proto__": {"preset": "tunnel"}}');
+        expect(normalizeLineStyle(parsed)).toBeUndefined();
+
+        const withWidth = normalizeLineStyle(
+            JSON.parse('{"__proto__": {"preset": "tunnel"}, "width": 2}')
+        )!;
+        expect(withWidth).toEqual({ width: 2 });
+        expect(withWidth.preset).toBeUndefined();
+        expect(Object.getPrototypeOf(withWidth)).toBe(Object.prototype);
+    });
+
+    it('keeps valid styles as they are', () => {
+        const full: TrackLineStyle = {
+            preset: 'disused',
+            pattern: 'dash-dot',
+            color: 0x123456,
+            width: 2.5,
+        };
+        expect(normalizeLineStyle(full)).toEqual(full);
     });
 });
 

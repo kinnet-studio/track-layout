@@ -1,4 +1,12 @@
-import type { TrackLineStyle, TrackSegment, TrackStyle } from './types.js';
+import {
+    LINE_PATTERNS,
+    LINE_PRESETS,
+    type LinePattern,
+    type LinePreset,
+    type TrackLineStyle,
+    type TrackSegment,
+    type TrackStyle,
+} from './types.js';
 
 /** Appearance applied to segments when they are created. */
 export type SegmentStyle = {
@@ -38,21 +46,44 @@ export const DEFAULT_SEGMENT_STYLE: Readonly<SegmentStyle> = Object.freeze({
 });
 
 /**
- * A copy of `style` holding only its defined fields, or undefined when it has
- * none. Keeps two segments from sharing one object and stores an empty style
- * as unset.
+ * The one gate every `lineStyle` goes through before the model stores it, so
+ * a stored style is always one `validateSerializedTrackData` accepts and the
+ * renderer can rely on. Returns a new object holding only what is valid:
+ *
+ * - `preset` if it is in {@link LINE_PRESETS}, `pattern` if it is in
+ *   {@link LINE_PATTERNS};
+ * - `color` if it is an integer from 0 to 0xFFFFFF;
+ * - `width` clamped to 1 to 8 if it is a finite number.
+ *
+ * Anything else is dropped: other values, unknown keys (only these four keys
+ * are read, so a `__proto__` key can't reach the copy), and a style that is
+ * `null` or not an object. The result is undefined when nothing is left, so an
+ * empty style is stored as unset. The copy keeps two segments from sharing one
+ * object.
  */
 export function normalizeLineStyle(
     style: TrackLineStyle | undefined
 ): TrackLineStyle | undefined {
-    if (style === undefined) {
+    if (typeof style !== 'object' || style === null) {
         return undefined;
     }
+    const { preset, pattern, color, width } = style as Record<string, unknown>;
     const copy: TrackLineStyle = {};
-    for (const key of Object.keys(style) as (keyof TrackLineStyle)[]) {
-        if (style[key] !== undefined) {
-            (copy as Record<string, unknown>)[key] = style[key];
-        }
+    if ((LINE_PRESETS as readonly unknown[]).includes(preset)) {
+        copy.preset = preset as LinePreset;
+    }
+    if ((LINE_PATTERNS as readonly unknown[]).includes(pattern)) {
+        copy.pattern = pattern as LinePattern;
+    }
+    if (
+        Number.isInteger(color) &&
+        (color as number) >= 0 &&
+        (color as number) <= 0xffffff
+    ) {
+        copy.color = color as number;
+    }
+    if (typeof width === 'number' && Number.isFinite(width)) {
+        copy.width = Math.min(8, Math.max(1, width));
     }
     return Object.keys(copy).length > 0 ? copy : undefined;
 }
