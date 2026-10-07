@@ -2260,6 +2260,29 @@ for (const style of ['centerline', 'rails'] as const) {
             expect(linesOf(host, u2)).toHaveLength(LINES + 2);
         });
 
+        it('keeps two decks where the upper tracks cross each other on the bridge', () => {
+            // A diamond centred 1 m from the lower track, its tracks 30° either
+            // side of +y: they cross the lower track 1.15 m apart.
+            const { host, graph } = lineScene();
+            lower(graph);
+            const [dx, dy] = [25, 50 * Math.cos(Math.PI / 6)];
+            const u1 = layLine(
+                graph,
+                { x: 50 - dx, y: -1 - dy },
+                { x: 50 + dx, y: -1 + dy },
+                ELEVATION.ABOVE_1
+            );
+            const u2 = layLine(
+                graph,
+                { x: 50 + dx, y: -1 - dy },
+                { x: 50 - dx, y: -1 + dy },
+                ELEVATION.ABOVE_1
+            );
+
+            expect(linesOf(host, u1)).toHaveLength(LINES + 2);
+            expect(linesOf(host, u2)).toHaveLength(LINES + 2);
+        });
+
         /**
          * An upper track at `x` in two segments joined at y = 1, so its deck
          * (half-length DECK, about 2.03 m) runs 1.03 m past the joint. The

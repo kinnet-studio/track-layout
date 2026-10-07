@@ -1299,6 +1299,7 @@ describe('sharedBridgePairs', () => {
         normal: { x: -1, y: 0 },
         gauge: 1.435,
         height: 10,
+        reach: 2.5,
         ...o,
     });
 
@@ -1389,5 +1390,20 @@ describe('sharedBridgePairs', () => {
 
     it('does not pair crossings under 0.5 m apart', () => {
         expect(sharedBridgePairs([over(0, 50), over(1, 50.4)])).toEqual([]);
+    });
+
+    // Tangents (0.6, 0.8) at x = 49 and (-0.6, 0.8) at x = 51: the centre
+    // lines meet 1.667 m along each track from the crossings.
+    const crossingOnTheBridge = (reach: number) => [
+        over(0, 49, { normal: { x: -0.8, y: 0.6 }, reach }),
+        over(1, 51, { normal: { x: -0.8, y: -0.6 }, reach }),
+    ];
+
+    it('does not pair tracks that cross each other on the bridge', () => {
+        expect(sharedBridgePairs(crossingOnTheBridge(2.5))).toEqual([]);
+    });
+
+    it('pairs tracks that cross each other beyond both decks', () => {
+        expect(sharedBridgePairs(crossingOnTheBridge(1.5))).toHaveLength(1);
     });
 });

@@ -1020,6 +1020,13 @@ export class TrackRenderSystem {
                 const tangent = PointCal.unitVector(
                     other.curve.derivative(crossing.otherT)
                 );
+                const deck = crossingMark(
+                    across,
+                    self,
+                    this._terrainData,
+                    renderStyle,
+                    this._bridgeGapClearance
+                );
                 over.push({
                     segment: crossing.otherSegment,
                     point: segment.curve.get(crossing.t),
@@ -1027,6 +1034,7 @@ export class TrackRenderSystem {
                     normal: { x: -tangent.y, y: tangent.x },
                     gauge: other.gauge,
                     height: heightAt(across.heights, crossing.otherT),
+                    reach: deck?.halfLength ?? 0,
                 });
             }
         }

@@ -354,6 +354,8 @@ export type OverCrossing = {
     gauge: number;
     /** The upper track's height at the crossing, in metres. */
     height: number;
+    /** How far (m) the upper track's deck reaches each way from the crossing. */
+    reach: number;
 };
 
 /**
@@ -366,6 +368,25 @@ export type SharedBridgePair = {
 };
 
 /**
+ * Whether the centre lines of `a` and `b`, continued straight from where they
+ * cross the lower track (`delta` apart), meet within either one's deck.
+ */
+function meetOnTheDecks(
+    a: OverCrossing,
+    b: OverCrossing,
+    delta: Point
+): boolean {
+    const tangentA = { x: a.normal.y, y: -a.normal.x };
+    const tangentB = { x: b.normal.y, y: -b.normal.x };
+    const cross = (p: Point, q: Point) => p.x * q.y - p.y * q.x;
+    const turn = cross(tangentA, tangentB);
+    if (Math.abs(turn) < PARALLEL_SIN) return false;
+    const alongA = cross(delta, tangentB) / turn;
+    const alongB = cross(delta, tangentA) / turn;
+    return Math.abs(alongA) <= a.reach || Math.abs(alongB) <= b.reach;
+}
+
+/**
  * The pairs of decks over one lower segment that share a bridge. Only
  * neighbours along the lower segment are compared, so in a run of three the
  * middle one pairs with each outer one. Two neighbours share when they are
@@ -374,6 +395,9 @@ export type SharedBridgePair = {
  * parapets is at most {@link SHARED_BRIDGE_SPACE}. That space is measured
  * across each track and the smaller taken, so the answer is the same from
  * either track, and diverging tracks are judged where they are closest.
+ * Tracks whose centre lines, continued straight from the crossings, meet
+ * within either deck don't share: they cross or join on the bridge, so which
+ * side of each faces the other changes along it.
  */
 export function sharedBridgePairs(
     over: readonly OverCrossing[]
@@ -386,6 +410,7 @@ export function sharedBridgePairs(
         if (Math.abs(a.height - b.height) >= VERTICAL_CLEARANCE) continue;
         const delta = PointCal.subVector(b.point, a.point);
         if (PointCal.magnitude(delta) < SHARED_BRIDGE_MIN_APART) continue;
+        if (meetOnTheDecks(a, b, delta)) continue;
         const acrossA = PointCal.dotProduct(delta, a.normal);
         const acrossB = PointCal.dotProduct(delta, b.normal);
         const spacing = Math.min(Math.abs(acrossA), Math.abs(acrossB));

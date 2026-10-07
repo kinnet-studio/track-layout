@@ -63,6 +63,8 @@ export type OverCrossing = {
     gauge: number;
     /** The upper track's height at the crossing, in metres. */
     height: number;
+    /** How far (m) the upper track's deck reaches each way from the crossing. */
+    reach: number;
 };
 
 /** Two neighbouring decks over one lower segment that make one bridge. */
@@ -82,6 +84,7 @@ export function sharedBridgePairs(
 - **The rule.** Neighbours *a* and *b* (with *s*<sub>a</sub> ≤ *s*<sub>b</sub>) share a bridge when all of these hold:
     - **Same level:** |*h*<sub>a</sub> − *h*<sub>b</sub>| < `VERTICAL_CLEARANCE`.
     - **Not meeting:** |*b*.point − *a*.point| ≥ `SHARED_BRIDGE_MIN_APART` (0.5 m, the same distance `getCrossings` uses for touches at a shared joint). Crossing points closer than that mean the two tracks meet over the lower track, at a junction or a crossing on the bridge, and which side faces the other isn't defined. They keep their own decks, as today.
+    - **Not crossing on the bridge:** the two centre lines, continued straight from their crossing points (along the tangents, from the normals), don't meet within either deck: |*t*| > `reach` along *a* and |*u*| > `reach` along *b*, where they meet at *a*.point + *t*·*T*<sub>a</sub> = *b*.point + *u*·*T*<sub>b</sub>. Tracks that cross or join on the bridge change sides along it, so leaving out the parapets facing each other at the crossing would leave out the wrong ones further on. They keep their own decks. Parallel tracks never meet. Branches that join well beyond the deck, like the two tracks just past a flying junction, still pair.
     - **Close enough:** with Δ = *b*.point − *a*.point, min(|Δ · *N*<sub>a</sub>|, |Δ · *N*<sub>b</sub>|) ≤ *P*<sub>a</sub> + *P*<sub>b</sub> + `SHARED_BRIDGE_SPACE`, where *P* is `parapetOffset(gauge)`. Δ · *N* is how far apart the two crossings are, measured across that track. Taking the smaller makes the rule symmetric: it gives the same answer from either track, and for diverging tracks it judges them by where they are closest.
 - **Sides.** *a*'s side is the sign of Δ · *N*<sub>a</sub>, and *b*'s is the sign of −Δ · *N*<sub>b</sub>.
     - Δ lies along the lower track, which `getCrossings` only reports crossed at sin θ ≥ 0.02, so with |Δ| ≥ 0.5 m neither product is zero.
@@ -125,7 +128,7 @@ export type MarkSpan = {
 
 - **`over: OverCrossing[]`**: the tracks that make decks over this segment, as this segment sees them. `_findCrossingMarks` already builds both sides of each crossing:
     - an entry goes in when `crossingMark(self, across, …)` returns a gap and `across` isn't a `bridge` preset
-    - `point` is `self.curve.get(t)`, `s` is `self.curve.lengthAtT(t)`, `normal` is the upper track's unit tangent at `otherT` turned toward +y, and `height` is `heightAt(heightsOf(other), otherT)`
+    - `point` is `self.curve.get(t)`, `s` is `self.curve.lengthAtT(t)`, `normal` is the upper track's unit tangent at `otherT` turned toward +y, `height` is `heightAt(heightsOf(other), otherT)`, and `reach` is the half-length of the deck the upper track draws there, `crossingMark(across, self, …).halfLength`
 - **The lower segment of each deck:** each own mark records the segment it crosses, so the renderer can look up that segment's `over` list.
 
 The cache is dropped exactly as today. Adding, removing or re-presetting a track drops the cached marks of the segments it crosses, so their `over` lists are rebuilt before anything reads them.
@@ -171,6 +174,7 @@ The full redraws (the constructor and a render-style switch) still draw each seg
         - the input's order doesn't change the result
         - two diverging tracks give the same answer from either side
         - crossing points under 0.5 m apart don't pair
+        - tracks whose centre lines meet within a deck don't pair; ones that meet beyond both decks do
     - **`buildLineTrack`:**
         - a deck sharing its positive side draws only its negative parapet, with both wings
         - a deck sharing both sides draws no parapets
