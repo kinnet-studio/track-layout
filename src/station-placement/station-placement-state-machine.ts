@@ -10,7 +10,7 @@ import { PointCal } from '@ue-too/math';
 
 import type { TrackGraph } from '../index.js';
 import { ELEVATION } from '../index.js';
-import { createIslandStation } from '../index.js';
+import { createIslandStation, defaultIslandLayout } from '../index.js';
 import type { StationManager } from '../index.js';
 import type { StationPlacementPreview } from './preview.js';
 
@@ -54,9 +54,6 @@ export class StationPlacementEngine implements StationPlacementContext {
     private _convertWindowToWorld: (position: Point) => Point;
 
     private _dragStart: Point | null = null;
-    /** Track spacing matching the factory defaults (platformWidth + 2*offset). */
-    /** Track spacing matching the factory defaults (platformWidth + 2*offset = 8 + 2*1.2). */
-    private _trackSpacing = 10.4;
 
     constructor(
         trackGraph: TrackGraph,
@@ -78,7 +75,7 @@ export class StationPlacementEngine implements StationPlacementContext {
             position,
             { x: 1, y: 0 },
             0.5,
-            this._trackSpacing
+            this._trackSpacing()
         );
     }
 
@@ -97,7 +94,12 @@ export class StationPlacementEngine implements StationPlacementContext {
             y: (this._dragStart.y + position.y) / 2,
         };
 
-        this._preview.showPreview(center, direction, dist, this._trackSpacing);
+        this._preview.showPreview(
+            center,
+            direction,
+            dist,
+            this._trackSpacing()
+        );
     }
 
     finishDrag(position: Point): void {
@@ -131,6 +133,12 @@ export class StationPlacementEngine implements StationPlacementContext {
     cancelPlacement(): void {
         this._preview.hidePreview();
         this._dragStart = null;
+    }
+
+    /** The track spacing createIslandStation's defaults give the current gauge. */
+    private _trackSpacing(): number {
+        return defaultIslandLayout(this._trackGraph, this._getGauge())
+            .trackSpacing;
     }
 
     setup(): void {}

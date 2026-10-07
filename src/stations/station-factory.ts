@@ -2,14 +2,12 @@ import type { Point } from '@ue-too/math';
 import { PointCal } from '@ue-too/math';
 
 import { DEFAULT_GAUGE_PRESET } from '../tracks/gauge-presets.js';
+import { segmentFieldsFromStyle } from '../tracks/segment-style.js';
 import type { TrackGraph } from '../tracks/track.js';
 import type { ELEVATION } from '../tracks/types.js';
+import { computePlatformOffset } from './platform-offset.js';
 import type { StationManager } from './station-manager.js';
 import type { Platform, StopPosition } from './types.js';
-
-/** Default lateral distance from track centerline to platform edge (meters).
- * Must be larger than ballast half-width (~0.75m) to create a gap between track and platform. */
-const DEFAULT_PLATFORM_OFFSET = 1.2;
 
 /** Default track gauge in meters (from preset registry). */
 const DEFAULT_GAUGE = DEFAULT_GAUGE_PRESET.width;
@@ -17,9 +15,24 @@ const DEFAULT_GAUGE = DEFAULT_GAUGE_PRESET.width;
 /** Default platform width (meters). Typical island platform is ~8–10m wide. */
 const DEFAULT_PLATFORM_WIDTH = 8;
 
-/** Distance between the two track centerlines of an island-platform station (meters). */
-const DEFAULT_TRACK_SPACING =
-    DEFAULT_PLATFORM_WIDTH + 2 * DEFAULT_PLATFORM_OFFSET;
+/**
+ * The island `createIslandStation` lays by default with `gauge` on
+ * `trackGraph`: its platform edges as far from the tracks as a
+ * track-aligned platform's (`computePlatformOffset`, counting the bed new
+ * track is laid with), and its tracks far enough apart for an 8 m island
+ * between them.
+ */
+export function defaultIslandLayout(
+    trackGraph: TrackGraph,
+    gauge: number
+): { platformOffset: number; trackSpacing: number } {
+    const { bedWidth } = segmentFieldsFromStyle(trackGraph.newSegmentStyle);
+    const platformOffset = computePlatformOffset(gauge, bedWidth);
+    return {
+        platformOffset,
+        trackSpacing: DEFAULT_PLATFORM_WIDTH + 2 * platformOffset,
+    };
+}
 
 export type CreateIslandStationOptions = {
     /** Center position of the station in world coordinates. */
@@ -31,7 +44,15 @@ export type CreateIslandStationOptions = {
     elevation: ELEVATION;
     name?: string;
     gauge?: number;
+    /**
+     * Distance between the two track centrelines (meters). Defaults to an
+     * 8 m island between platform edges `platformOffset` from each track.
+     */
     trackSpacing?: number;
+    /**
+     * Distance from each track centreline to its platform edge (meters).
+     * Defaults to a track-aligned platform's (see `defaultIslandLayout`).
+     */
     platformOffset?: number;
 };
 
@@ -55,8 +76,8 @@ export function createIslandStation(
         elevation,
         name = 'Station',
         gauge = DEFAULT_GAUGE,
-        trackSpacing = DEFAULT_TRACK_SPACING,
-        platformOffset = DEFAULT_PLATFORM_OFFSET,
+        platformOffset = defaultIslandLayout(trackGraph, gauge).platformOffset,
+        trackSpacing = DEFAULT_PLATFORM_WIDTH + 2 * platformOffset,
     } = options;
 
     const dir = PointCal.unitVector(direction);

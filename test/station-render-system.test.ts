@@ -92,7 +92,7 @@ describe('StationRenderSystem', () => {
 
     it('draws the safety line no wider than an island narrower than it', () => {
         const { graph, host, stations, renderer } = scene();
-        // Halves 0.1 m wide: the default 1.2 m offset either side, plus 0.2 m.
+        // Halves 0.1 m wide: edges 1.2 m from tracks 2.6 m apart.
         const narrow = createIslandStation(graph, stations, {
             position: { x: 0, y: 100 },
             direction: { x: 1, y: 0 },
@@ -189,8 +189,7 @@ describe('StationRenderSystem: outline style', () => {
         const lines = strokedLines(station);
         expect(lines.map(line => line.closed)).toEqual([true, true]);
         expect(fillsAnything(station)).toBe(false);
-        // The two halves of the island, 4 m wide each side of the middle,
-        // 1.2 m from tracks 5.2 m either side of it.
+        // The two halves of the island, 4 m wide each side of the middle.
         const extents = lines.map(extent).sort((a, b) => a[2]! - b[2]!);
         const expected = [
             [-50, 50, -4, 0],

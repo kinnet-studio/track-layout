@@ -15,6 +15,7 @@ describe('package entry', () => {
             'StationManager',
             'TrackAlignedPlatformManager',
             'createIslandStation',
+            'defaultIslandLayout',
             'validateSerializedTrackData',
             'DEFAULT_SEGMENT_STYLE',
             'defaultYieldToFrame',
