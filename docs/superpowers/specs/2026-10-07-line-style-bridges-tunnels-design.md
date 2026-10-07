@@ -51,7 +51,11 @@ getCrossings(segmentNumber: number): TrackCrossing[];
 ```
 
 - It searches the R-tree with the segment's AABB, skips the segment itself, and runs `curve.getCurveIntersections(other.curve)` on each candidate. The result is sorted by `t`.
-- **Shared-joint touches are dropped.** When the two segments share a joint *J*, an intersection is dropped if both `t` and `otherT` are within `JOINT_T_EPSILON` (1e-3) of *J*'s end on their own curve. That covers continuations and the branches of a junction. A real crossing elsewhere between the same two segments is kept.
+- **Hits are merged and refined.** `getCurveIntersections` is approximate: a single perpendicular crossing comes back as up to four hits about 0.01 apart in `t`. Hits within `CROSSING_MERGE_T` (0.05) of each other in both `t` and `otherT` are merged into their mean. The mean is then refined with Newton's method on `curve.get(t) − other.get(otherT) = 0`, for up to 8 iterations. If the tangents are parallel or the result leaves [0, 1], the mean is kept.
+- **Touches are dropped.** Two rules, applied after refinement:
+    - **Tangential:** an intersection is dropped when the tracks meet at sin θ < `CROSSING_MIN_SIN` (0.02, about 1°). The branches of a junction leave their joint with the same tangent, and their raw hits can land more than a metre from it. Tracks that touch this tangentially aren't crossing.
+    - **Shared joint:** when the two segments share a joint *J*, an intersection within `JOINT_TOUCH_DISTANCE` (0.5 m) of *J* is dropped. That covers a joint where the tracks meet at an angle.
+    - A real crossing elsewhere between two segments that share a joint is kept.
 - Returns `[]` for a segment that doesn't exist.
 - It doesn't read or change the stored `collision` arrays.
 
@@ -112,7 +116,7 @@ The module takes plain data and returns stroke instructions, with no Pixi object
 ### Parameterization
 
 - Lines are sampled every `LINE_TRACK_SAMPLE_LEN` (2 m) of arc length, as `sampleCurve` does today.
-- Each sample also carries its arc length `s` and its Bezier `t`, worked out from the curve's arc-length lookup table.
+- The samples are uniform in Bezier `t`, with `max(2, ceil(fullLength / 2))` steps. Each sample also carries its arc length `s = curve.lengthAtT(t)`, its unit tangent and its normal.
 - **Elevation** is linear in Bezier `t`, through `getElevationAtT`, as everywhere else in the model.
 - **Crossing positions** convert from `t` to `s` with `curve.lengthAtT(t)`.
 - **Pattern, gap and deck lengths** are measured in `s`.
@@ -161,6 +165,7 @@ Lengths are in screen pixels at width 1, and scale with the width:
 
 - The geometry module takes the current zoom (pixels per metre) and turns these into metres.
 - The pattern's phase runs along `s` from the segment's start, so it doesn't restart after a gap or a portal.
+- A line interval is never cut into more than `MAX_PATTERN_REPEATS` (4000) repeats. When it would be, the lengths are scaled up so that it gets exactly that many. Only very long track at very high zoom is affected.
 
 ### Crossings
 
@@ -188,6 +193,8 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
 - `L_gap = (P_upper + GAP_CLEARANCE) / sin θ + r · |cot θ|`, capped at `MAX_MARK_HALF_LENGTH`.
 - `r` is the segment's outermost line offset: 0 for `centerline`, `g / 2` for `rails`, or *P* for a `bridge` preset.
 
+Gaps cut the track lines and parapets, not portals or wings.
+
 **Clamping.** Decks and gaps are clamped to the segment they belong to, and a clamped deck end gets no wing. A crossing within a few metres of a joint can therefore leave a stub of the neighbouring segment's line, or a parapet without a wing. That's accepted.
 
 ### `bridge` preset
@@ -211,7 +218,10 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
 | `DECK_CLEARANCE`       | 1.5 m                                    |
 | `GAP_CLEARANCE`        | 0.5 m                                    |
 | `MAX_MARK_HALF_LENGTH` | 25 m                                     |
-| `JOINT_T_EPSILON`      | 1e-3                                     |
+| `CROSSING_MERGE_T`     | 0.05                                     |
+| `JOINT_TOUCH_DISTANCE` | 0.5 m                                    |
+| `CROSSING_MIN_SIN`     | 0.02                                     |
+| `MAX_PATTERN_REPEATS`  | 4000                                     |
 | `UNDERGROUND_LIGHTEN`  | 0.5                                      |
 | `RESTROKE_ZOOM_STEP`   | √2                                       |
 
@@ -228,7 +238,7 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
 - **Partner map.** `segment → crossing partners`, plus each drawn segment's joints and end points.
     - **Add:** call `getCrossings(n)`, record the partners both ways, and draw `n`. Then redraw each partner, and each segment at `n`'s joints that has a `tunnel` or `bridge` preset.
     - **Remove:** destroy `n`'s graphics and redraw its recorded partners. The model no longer has `n`, so their gaps or decks go. Then find the preset segments at `n`'s remembered joints with `getSegmentsAtJoint`, redraw them, and forget `n`.
-    - **Style change** (`onSegmentStyleChanged`): redraw `n`, its partners, and the preset segments at its joints. This covers gauge, which moves *P* and the gaps, and `lineStyle`.
+    - **Style change** (`onSegmentStyleChanged`): redraw `n`, its partners, and the preset segments at its joints. A `lineStyle` change can turn a crossing buried or change a run's ends. Gauge isn't a style field, so it can't change here.
         - It also fixes an existing gap: today a style change doesn't redraw a line-style segment at all.
     - **Render-style switch:** the existing full redraw rebuilds the map. Switching to `detailed` clears it.
     - **Redraw** rebuilds a segment's graphics in place, from `getTrackSegmentWithJoints(n)`.
@@ -237,6 +247,7 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
     - Each preview piece is drawn with its own elevation and the new-track `lineStyle`, which comes from the draw data.
     - It gets underground runs, portals and, for a `bridge` preset, full-length parapets with wings at both ends.
     - It gets no crossing marks and no joint-neighbour checks.
+    - Zooming doesn't re-stroke a preview; it is redrawn on its next change.
 - **Load.** Each add redraws partners that are already laid, so a segment with *k* crossings laid after it is drawn *k* + 1 times. Crossings are sparse, so loading isn't batched.
 - **Terrain** is sampled when a line is built, as today. There is no setter.
 
@@ -253,7 +264,7 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
 ## Testing (`bun test`, typecheck, format check)
 
 - **`test/track-crossings.test.ts`** (model):
-    - an X crossing is found from both segments, with matching `t` / `otherT`
+    - an X crossing is found from both segments, once, with `t` / `otherT` refined to the exact crossing
     - a continuation and a junction that share a joint report nothing
     - two segments that share a joint and also cross elsewhere report only the crossing
     - a removed segment drops out of its partner's crossings
@@ -283,7 +294,7 @@ The crossing angle θ is the angle between the two tangents at the crossing, fol
     - an underground segment is drawn broken and lighter, with no separate overlay
     - a ramp gets a portal
     - a preview is drawn underground and with the new-track line style
-    - a gauge change on the upper segment redraws its partner's gap
+    - the upper segment becoming a `tunnel` preset redraws its partner unbroken
     - a `lineStyle` change redraws the segment and a `tunnel`-preset neighbour's portal
     - styled segments re-stroke after a √2 zoom change; unstyled ones and smaller zoom changes don't
     - `detailed` ignores `lineStyle` and still draws its overlay (the existing tests cover the rest)
