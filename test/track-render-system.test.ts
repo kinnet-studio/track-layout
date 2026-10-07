@@ -1119,6 +1119,50 @@ describe('TrackRenderSystem: crossings and runs', () => {
         ).toEqual(['__simplified__0', '__simplified__1']);
     });
 
+    it('draws each segment once when a style switch redraws laid track', () => {
+        const { host, graph, renderer } = scene();
+        const { h, v } = crossing(graph);
+        const draw = spyOn(
+            TrackRenderSystem.prototype as any,
+            '_drawLineSegment'
+        );
+        try {
+            renderer.renderStyle = 'centerline';
+
+            expect(draw).toHaveBeenCalledTimes(2);
+        } finally {
+            draw.mockRestore();
+        }
+        expectBridge(host, h, v);
+    });
+
+    it('keeps run ends right when a style switch draws a tunnel run', () => {
+        const { host, graph, renderer } = scene();
+        layTrack(graph, [A, B, C]);
+        const tunnel = { lineStyle: { preset: 'tunnel' as const } };
+        graph.setSegmentStyle(0, tunnel);
+        graph.setSegmentStyle(1, tunnel);
+        const draw = spyOn(
+            TrackRenderSystem.prototype as any,
+            '_drawLineSegment'
+        );
+        try {
+            renderer.renderStyle = 'centerline';
+
+            expect(draw).toHaveBeenCalledTimes(2);
+        } finally {
+            draw.mockRestore();
+        }
+        const portalXs = (n: number) =>
+            linesOf(host, n)
+                .filter(line => line.color === 0x000000)
+                .map(line => line.points[1]!.x);
+        expect(portalXs(0)).toHaveLength(1);
+        expect(portalXs(0)[0]).toBeCloseTo(0, 6);
+        expect(portalXs(1)).toHaveLength(1);
+        expect(portalXs(1)[0]).toBeCloseTo(200, 6);
+    });
+
     it('puts tunnel portals only at the ends of a tunnel run', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';

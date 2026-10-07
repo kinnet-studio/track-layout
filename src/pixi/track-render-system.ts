@@ -180,7 +180,8 @@ const buildBezierLine = (curve: BCurve): Graphics => {
  * track lighter and broken with portals where it meets the ground, and each
  * segment in its `lineStyle` (a preset, pattern, colour and width in screen
  * pixels; one pixel, black and solid by default). They leave out ballast,
- * beds, shadows, catenary masts and tunnels, and need no texture renderer.
+ * beds, shadows, catenary masts and tunnel walls and cuttings, and need no
+ * texture renderer.
  */
 export type TrackRenderStyle = 'detailed' | 'centerline' | 'rails';
 
@@ -498,16 +499,23 @@ export class TrackRenderSystem {
     }
 
     /**
-     * Draws the track the manager already holds, through the same handlers
-     * that draw track added later.
+     * Draws the track the manager already holds. The detailed style goes
+     * through the same handler that draws track added later. A line style
+     * draws each segment once: the model already holds every segment, so the
+     * first draw of each sees all its crossing partners and neighbours, and
+     * the redraws that adding a segment does for them would only repeat it.
      */
     private _drawExistingTrack(): void {
+        const lineStyle = this._renderStyle !== 'detailed';
         for (const segmentNumber of this._trackCurveManager.livingEntities) {
             const segment =
                 this._trackCurveManager.getTrackSegmentWithJoints(
                     segmentNumber
                 );
-            if (segment !== null) {
+            if (segment === null) continue;
+            if (lineStyle) {
+                this._drawLineSegment(segmentNumber, segment);
+            } else {
                 this._onAddTrackSegment(segmentNumber, segment);
             }
         }

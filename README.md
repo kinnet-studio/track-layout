@@ -163,11 +163,11 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       middle of each segment) or `'rails'` (a line along each rail, the
       segment's gauge apart). The line styles show at every zoom level and
       draw the previews the same way. They leave out ballast, beds,
-      shadows, catenary masts and tunnels. They draw a bridge (parapets and
-      wings) where track crosses at least 3 m over other track, which is cut
-      beneath it, and underground track as lighter, broken lines with a
-      portal where it reaches the surface. Highlights and snap dots are
-      drawn as in `'detailed'`.
+      shadows, catenary masts and tunnel walls and cuttings. They draw a
+      bridge (parapets and wings) where track crosses at least 3 m over
+      other track, which is cut beneath it, and underground track as
+      lighter, broken lines with a portal where it reaches the surface.
+      Highlights and snap dots are drawn as in `'detailed'`.
         - Each segment's `lineStyle` (`{ preset?, pattern?, color?, width? }`,
           saved with the layout) changes how the line styles draw it.
           Presets are `tunnel` (drawn and treated as underground), `bridge`
