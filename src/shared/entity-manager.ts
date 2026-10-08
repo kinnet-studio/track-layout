@@ -151,13 +151,17 @@ export class GenericEntityManager<T> {
             );
             const newLivingEntitiesIndex = new Array(this._maxEntities);
 
+            // Unlike in createEntity, the arrays need not be full here, and a
+            // slot never set would copy over as undefined, which the
+            // living-entity lists keep (they drop only null).
             for (let i = 0; i < currentMaxEntities; i++) {
-                newPackedEntityData[i] = this._packedEntityData[i];
+                newPackedEntityData[i] = this._packedEntityData[i] ?? null;
                 newEntityNumberToPackedDataIndex[i] =
-                    this._entityNumberToPackedDataIndex[i];
+                    this._entityNumberToPackedDataIndex[i] ?? null;
                 newPackedDataIndexToEntityNumber[i] =
-                    this._packedDataIndexToEntityNumber[i];
-                newLivingEntitiesIndex[i] = this._livingEntitiesIndex[i];
+                    this._packedDataIndexToEntityNumber[i] ?? null;
+                newLivingEntitiesIndex[i] =
+                    this._livingEntitiesIndex[i] ?? null;
             }
 
             this._packedEntityData = newPackedEntityData;
