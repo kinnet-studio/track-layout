@@ -45,6 +45,18 @@ describe('GenericEntityManager.createEntityWithId', () => {
         expect(manager.getLivingEntityCount()).toBe(1);
     });
 
+    it('should list only living entities after expanding with free slots', () => {
+        manager.createEntityWithId(0, 'entity-0');
+        manager.createEntityWithId(22, 'entity-22');
+
+        expect(manager.getLivingEntities()).toEqual(['entity-0', 'entity-22']);
+        expect(manager.getLivingEntitesIndex()).toEqual([0, 22]);
+        expect(manager.getLivingEntitiesWithIndex()).toEqual([
+            { index: 0, entity: 'entity-0' },
+            { index: 22, entity: 'entity-22' },
+        ]);
+    });
+
     it('should throw when entity ID is already in use', () => {
         manager.createEntityWithId(2, 'entity-2');
         expect(() => {
@@ -859,5 +871,26 @@ describe('TrackGraph.serialize / loadFromSerializedData', () => {
 
         expect(graph2.trackSegments.length).toBe(1);
         expect(graph2.getJoints().length).toBe(2);
+    });
+
+    it('should load a save whose segment numbers have gaps past the initial capacity', async () => {
+        const graph = new TrackGraph();
+        for (let i = 0; i < 11; i++) {
+            graph.createNewTrackSegment(
+                { x: 0, y: i * 50 },
+                { x: 100, y: i * 50 },
+                [{ x: 50, y: i * 50 }]
+            );
+        }
+        for (const segmentNumber of [0, 1, 2, 3, 4]) {
+            graph.removeTrackSegment(segmentNumber);
+        }
+        const saved = JSON.parse(JSON.stringify(graph.serialize()));
+
+        const loaded = new TrackGraph();
+        await loaded.loadFromSerializedData(saved);
+
+        expect(loaded.trackSegments).toHaveLength(6);
+        expect(loaded.getJoints()).toHaveLength(graph.getJoints().length);
     });
 });
