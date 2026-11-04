@@ -58,6 +58,16 @@ layout.happens('pointerMove', { x: 100, y: 0 });
 layout.happens('leftPointerUp', { x: 100, y: 0 }); // lays a segment
 ```
 
+When the engine can't lay a curve, the layout goes back to choosing a start
+and lays nothing. `engine.onCurveRefused` says why, with a `CurveRefusal`:
+for example `extendAngle` when the curve doesn't carry on from the track end
+it extends, or `gaugeMismatch`. `engine.lastCurveRefusal` holds the last
+reason, and is null once a curve is laid.
+
+```ts
+engine.onCurveRefused(refusal => showWarning(refusal));
+```
+
 ## Placing stations
 
 `track-layout/station-placement` holds the station placement tools as

@@ -20,7 +20,7 @@ import type {
     DeletionHighlightState,
     PreviewDrawData,
 } from './preview-types.js';
-import { NewJointType } from './types.js';
+import { CurveRefusal, NewJointType } from './types.js';
 
 export class CurveCreationEngine implements LayoutContext {
     private _trackGraph: TrackGraph;
@@ -51,6 +51,9 @@ export class CurveCreationEngine implements LayoutContext {
     private _previewCurveGauge: number = 1.067;
 
     private _lastCurveSuccess: boolean = false;
+    private _lastCurveRefusal: CurveRefusal | null = null;
+    private _curveRefusedObservable: Observable<[CurveRefusal]> =
+        new SynchronousObservable<[CurveRefusal]>();
 
     private _previewCurveForDeletion: number | null = null;
     private _deletionHighlightObservable: Observable<[DeletionHighlightState]> =
@@ -89,6 +92,25 @@ export class CurveCreationEngine implements LayoutContext {
 
     get lastCurveSuccess(): boolean {
         return this._lastCurveSuccess;
+    }
+
+    /**
+     * Why the last `endCurve` laid nothing; null after it laid a curve, or
+     * before the first `endCurve`.
+     */
+    get lastCurveRefusal(): CurveRefusal | null {
+        return this._lastCurveRefusal;
+    }
+
+    /**
+     * Tells `observer` why, each time `endCurve` refuses to lay a curve.
+     * Returns a function that unsubscribes it.
+     */
+    onCurveRefused(
+        observer: Observer<[CurveRefusal]>,
+        options?: SubscriptionOptions
+    ): () => void {
+        return this._curveRefusedObservable.subscribe(observer, options);
     }
 
     get currentTension(): number {
@@ -529,13 +551,15 @@ export class CurveCreationEngine implements LayoutContext {
     endCurve(): Point | null {
         const res = this.endCurveInternal();
         console.log('endCurve', res);
-        if (res !== null) {
-            this._lastCurveSuccess = true;
-        } else {
+        if (typeof res === 'string') {
             this.cancelCurrentCurve();
             this._lastCurveSuccess = false;
+            this._lastCurveRefusal = res;
+            this._curveRefusedObservable.notify(res);
+            return null;
         }
-
+        this._lastCurveSuccess = true;
+        this._lastCurveRefusal = null;
         return res;
     }
 
@@ -549,7 +573,7 @@ export class CurveCreationEngine implements LayoutContext {
         this._deletionHighlightObservable.notify(null);
     }
 
-    private endCurveInternal(): Point | null {
+    private endCurveInternal(): Point | CurveRefusal {
         let res: Point | null = null;
 
         if (
@@ -557,8 +581,7 @@ export class CurveCreationEngine implements LayoutContext {
             this._previewCurve === null ||
             this._newEndJoint === null
         ) {
-            this.cancelCurrentCurve();
-            return null;
+            return 'incomplete';
         }
 
         const cps = this._previewCurve.curve.getControlPoints().slice(1, -1);
@@ -596,8 +619,7 @@ export class CurveCreationEngine implements LayoutContext {
                 )
             ) {
                 console.warn('extend track not possible for start joint');
-                this.cancelCurrentCurve();
-                return null;
+                return 'extendAngle';
             }
             if (
                 !gaugesAreCompatible(
@@ -607,8 +629,7 @@ export class CurveCreationEngine implements LayoutContext {
                 )
             ) {
                 console.warn('gauge mismatch at start joint');
-                this.cancelCurrentCurve();
-                return null;
+                return 'gaugeMismatch';
             }
         }
 
@@ -632,8 +653,7 @@ export class CurveCreationEngine implements LayoutContext {
                 )
             ) {
                 console.warn('extend track not possible for end joint');
-                this.cancelCurrentCurve();
-                return null;
+                return 'extendAngle';
             }
             if (
                 !gaugesAreCompatible(
@@ -643,8 +663,7 @@ export class CurveCreationEngine implements LayoutContext {
                 )
             ) {
                 console.warn('gauge mismatch at end joint');
-                this.cancelCurrentCurve();
-                return null;
+                return 'gaugeMismatch';
             }
         }
 
@@ -659,23 +678,20 @@ export class CurveCreationEngine implements LayoutContext {
             console.log('end joint elevation', this._newEndJoint.elevation);
             if (this._newStartJoint.elevation != this._newEndJoint.elevation) {
                 console.warn('branching curve can not be sloped');
-                this.cancelCurrentCurve();
-                return null;
+                return 'slopedBranch';
             }
 
             if (this._newStartJoint.type == 'branchCurve') {
                 if (this._newStartJoint.curveElevation.curveIsSloped) {
                     console.warn('branching curve can not be sloped');
-                    this.cancelCurrentCurve();
-                    return null;
+                    return 'slopedBranch';
                 }
             }
 
             if (this._newEndJoint.type == 'branchCurve') {
                 if (this._newEndJoint.curveElevation.curveIsSloped) {
                     console.warn('branching curve can not be sloped');
-                    this.cancelCurrentCurve();
-                    return null;
+                    return 'slopedBranch';
                 }
             }
         }
@@ -689,8 +705,7 @@ export class CurveCreationEngine implements LayoutContext {
                 )
             ) {
                 console.warn('gauge mismatch at start branch joint');
-                this.cancelCurrentCurve();
-                return null;
+                return 'gaugeMismatch';
             }
         }
 
@@ -703,8 +718,7 @@ export class CurveCreationEngine implements LayoutContext {
                 )
             ) {
                 console.warn('gauge mismatch at end branch joint');
-                this.cancelCurrentCurve();
-                return null;
+                return 'gaugeMismatch';
             }
         }
 
@@ -719,8 +733,7 @@ export class CurveCreationEngine implements LayoutContext {
                 console.warn(
                     'gauge mismatch: cannot branch from segment with different gauge'
                 );
-                this.cancelCurrentCurve();
-                return null;
+                return 'gaugeMismatch';
             }
         }
 
@@ -735,8 +748,7 @@ export class CurveCreationEngine implements LayoutContext {
                 console.warn(
                     'gauge mismatch: cannot branch from segment with different gauge'
                 );
-                this.cancelCurrentCurve();
-                return null;
+                return 'gaugeMismatch';
             }
         }
 
@@ -751,8 +763,19 @@ export class CurveCreationEngine implements LayoutContext {
                 ))
         ) {
             console.warn('cannot branch from a segment under a platform');
-            this.cancelCurrentCurve();
-            return null;
+            return 'protectedSegment';
+        }
+
+        // Checked before anything is split, so a refusal changes nothing.
+        if (
+            endsAreAlreadyJoined(
+                this._newStartJoint,
+                this._newEndJoint,
+                this._trackGraph
+            )
+        ) {
+            console.warn('a segment already joins the two ends');
+            return 'alreadyJoined';
         }
 
         // END OF VALIDATION PIPELINE
@@ -837,16 +860,19 @@ export class CurveCreationEngine implements LayoutContext {
             if (endJointNumber === null) {
                 console.warn('endJointNumber is null');
             }
-            this.cancelCurrentCurve();
-            return null;
+            return 'graphRefused';
         }
 
-        this._trackGraph.connectJoints(
-            startJointNumber,
-            endJointNumber,
-            cps,
-            this._previewCurveGauge
-        );
+        if (
+            !this._trackGraph.connectJoints(
+                startJointNumber,
+                endJointNumber,
+                cps,
+                this._previewCurveGauge
+            )
+        ) {
+            return 'graphRefused';
+        }
         this.cancelCurrentCurve();
 
         return res;
@@ -953,6 +979,50 @@ export class CurveCreationEngine implements LayoutContext {
     convert2WorldPosition(position: Point): Point {
         return this._convertWindowToWorld(position);
     }
+}
+
+/**
+ * Whether a segment already joins the two ends: both are joints it joins,
+ * one branches off it and the other is one of its joints, or both branch
+ * off it. Splitting for such a curve would leave a joint and lay nothing.
+ */
+function endsAreAlreadyJoined(
+    start: NewJointType,
+    end: NewJointType,
+    trackGraph: TrackGraph
+): boolean {
+    const startSegment = branchedSegmentOf(start);
+    const endSegment = branchedSegmentOf(end);
+    if (startSegment !== null && endSegment !== null) {
+        return startSegment === endSegment;
+    }
+    const startJoint = existingJointOf(start);
+    const endJoint = existingJointOf(end);
+    if (startJoint !== null && endJoint !== null) {
+        return (
+            trackGraph.getJoint(startJoint)?.connections.has(endJoint) ?? false
+        );
+    }
+    const segmentNumber = startSegment ?? endSegment;
+    const jointNumber = startJoint ?? endJoint;
+    if (segmentNumber === null || jointNumber === null) {
+        return false;
+    }
+    const segment = trackGraph.getTrackSegmentWithJoints(segmentNumber);
+    return (
+        segment !== null &&
+        (segment.t0Joint === jointNumber || segment.t1Joint === jointNumber)
+    );
+}
+
+function branchedSegmentOf(joint: NewJointType): number | null {
+    return joint.type === 'branchCurve' ? joint.constraint.curve : null;
+}
+
+function existingJointOf(joint: NewJointType): number | null {
+    return joint.type === 'extendingTrack' || joint.type === 'branchJoint'
+        ? joint.constraint.jointNumber
+        : null;
 }
 
 function extendTrackIsPossible(
