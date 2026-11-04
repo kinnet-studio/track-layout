@@ -146,6 +146,154 @@ describe('CurveCreationEngine refused commits', () => {
     });
 });
 
+describe('CurveCreationEngine refusal reasons', () => {
+    it('has no refusal before anything is laid', () => {
+        const { engine } = setup();
+        expect(engine.lastCurveRefusal).toBeNull();
+    });
+
+    it('says incomplete when there is nothing to lay', () => {
+        const { engine } = setup();
+        expect(engine.endCurve()).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('incomplete');
+    });
+
+    it('says extendAngle when the start does not carry on from a track end', () => {
+        const { engine } = withStraightTrack();
+        lay(engine, { x: 100, y: 0 }, { x: 0, y: 30 });
+        expect(engine.lastCurveRefusal).toBe('extendAngle');
+    });
+
+    it('says extendAngle when the end does not carry on from a track end', () => {
+        const { engine } = withStraightTrack();
+        lay(engine, { x: 50, y: 30 }, { x: 100, y: 0 });
+        expect(engine.lastCurveRefusal).toBe('extendAngle');
+    });
+
+    it('says gaugeMismatch when extending a track of another gauge', () => {
+        const { engine } = withStraightTrack();
+        engine.setCurrentGauge(1.435);
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        expect(engine.lastCurveRefusal).toBe('gaugeMismatch');
+    });
+
+    it('says gaugeMismatch when branching off a track of another gauge', () => {
+        const { engine } = withStraightTrack();
+        engine.setCurrentGauge(1.435);
+        lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 });
+        expect(engine.lastCurveRefusal).toBe('gaugeMismatch');
+    });
+
+    it('says gaugeMismatch when branching from a joint of another gauge', () => {
+        const { engine } = withStraightTrack();
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        engine.setCurrentGauge(1.435);
+        lay(engine, { x: 100, y: 0 }, { x: 150, y: 40 });
+        expect(engine.lastCurveRefusal).toBe('gaugeMismatch');
+    });
+
+    it('says slopedBranch when a branch would change elevation', () => {
+        const { engine } = withStraightTrack();
+        engine.setCurrentJointElevation(ELEVATION.ABOVE_1);
+        lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 });
+        expect(engine.lastCurveRefusal).toBe('slopedBranch');
+    });
+
+    it('says slopedBranch when branching off a sloped segment', () => {
+        const { graph, engine } = setup();
+        const a = graph.createNewEmptyJoint(
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            ELEVATION.GROUND
+        );
+        const b = graph.createNewEmptyJoint(
+            { x: 100, y: 0 },
+            { x: 1, y: 0 },
+            ELEVATION.ABOVE_1
+        );
+        graph.connectJoints(a, b, [{ x: 50, y: 0 }]);
+        lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 });
+        expect(engine.lastCurveRefusal).toBe('slopedBranch');
+    });
+
+    it('says protectedSegment when branching off a protected segment', () => {
+        const { graph, engine } = withStraightTrack();
+        graph.setSegmentProtectionCheck(() => true);
+        lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 });
+        expect(engine.lastCurveRefusal).toBe('protectedSegment');
+    });
+
+    it('says alreadyJoined, and splits nothing, for a branch to its own track end', () => {
+        const { graph, engine } = withStraightTrack();
+        expect(lay(engine, { x: 60, y: 0.5 }, { x: 100, y: 0 })).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('alreadyJoined');
+        expect(counts(graph)).toEqual({ segments: 1, joints: 2 });
+    });
+
+    it('says alreadyJoined, and splits nothing, for a joint to a branch off its own track', () => {
+        const { graph, engine } = withStraightTrack();
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        expect(lay(engine, { x: 100, y: 0 }, { x: 40, y: 0.5 })).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('alreadyJoined');
+        expect(counts(graph)).toEqual({ segments: 2, joints: 3 });
+    });
+
+    it('says alreadyJoined, and splits nothing, for two branches off one segment', () => {
+        const { graph, engine } = withStraightTrack();
+        expect(lay(engine, { x: 30, y: 0.2 }, { x: 70, y: 0.2 })).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('alreadyJoined');
+        expect(counts(graph)).toEqual({ segments: 1, joints: 2 });
+    });
+
+    it('says alreadyJoined for two joints a segment already joins', () => {
+        const { graph, engine } = withStraightTrack();
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        lay(engine, { x: 200, y: 0 }, { x: 300, y: 0 });
+        expect(lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 })).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('alreadyJoined');
+        expect(counts(graph)).toEqual({ segments: 3, joints: 4 });
+    });
+
+    it('says graphRefused when the graph will not split the segment', () => {
+        const { graph, engine } = withStraightTrack();
+        spyOn(
+            graph,
+            'insertJointIntoTrackSegmentUsingTrackNumber'
+        ).mockReturnValue(null);
+        expect(lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 })).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('graphRefused');
+    });
+
+    it('says graphRefused when the graph will not join the ends', () => {
+        const { graph, engine } = setup();
+        spyOn(graph, 'connectJoints').mockReturnValue(false);
+        expect(lay(engine, { x: 0, y: 0 }, { x: 100, y: 0 })).toBeNull();
+        expect(engine.lastCurveRefusal).toBe('graphRefused');
+        expect(engine.lastCurveSuccess).toBe(false);
+    });
+
+    it('clears the refusal once a track is laid', () => {
+        const { engine } = withStraightTrack();
+        lay(engine, { x: 100, y: 0 }, { x: 0, y: 30 });
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        expect(engine.lastCurveSuccess).toBe(true);
+        expect(engine.lastCurveRefusal).toBeNull();
+    });
+
+    it('tells observers each refusal, and nothing for a laid track', () => {
+        const { engine } = withStraightTrack();
+        const refusals: string[] = [];
+        engine.onCurveRefused(refusal => refusals.push(refusal));
+
+        lay(engine, { x: 100, y: 0 }, { x: 0, y: 30 });
+        lay(engine, { x: 100, y: 0 }, { x: 200, y: 0 });
+        engine.setCurrentGauge(1.435);
+        lay(engine, { x: 200, y: 0 }, { x: 300, y: 0 });
+
+        expect(refusals).toEqual(['extendAngle', 'gaugeMismatch']);
+    });
+});
+
 describe('CurveCreationEngine deletion', () => {
     it('highlights the hovered segment and deletes it', () => {
         const { graph, engine } = withStraightTrack();
