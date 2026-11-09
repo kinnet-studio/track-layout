@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import { layTrack } from './station-placement-helpers.js';
 import { layLine } from './track-helpers.js';
 
@@ -11,12 +10,7 @@ describe('getCrossings', () => {
     it('finds a crossing once from each side, at the exact point', () => {
         const graph = new TrackGraph();
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
         const pairs: [number, number][] = [
             [h, v],
             [v, h],
@@ -33,7 +27,7 @@ describe('getCrossings', () => {
     it('refines an oblique crossing', () => {
         const graph = new TrackGraph();
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        layLine(graph, { x: 0, y: -30 }, { x: 100, y: 30 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 0, y: -30 }, { x: 100, y: 30 }, 10);
         const [c] = cm(graph).getCrossings(h);
         expect(c!.t).toBeCloseTo(0.5, 6);
         expect(c!.otherT).toBeCloseTo(0.5, 6);
@@ -42,13 +36,10 @@ describe('getCrossings', () => {
     it('reports two crossings with the same track, sorted by t', () => {
         const graph = new TrackGraph();
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        layLine(
-            graph,
-            { x: 20, y: -40 },
-            { x: 80, y: -40 },
-            ELEVATION.ABOVE_1,
-            { x: 50, y: 120 }
-        );
+        layLine(graph, { x: 20, y: -40 }, { x: 80, y: -40 }, 10, {
+            x: 50,
+            y: 120,
+        });
         // y(u) = -40 + 320u - 320u², x(u) = 20 + 60u, and h's t = x / 100
         const us = [
             (320 - Math.sqrt(51200)) / 640,
@@ -65,12 +56,7 @@ describe('getCrossings', () => {
     it('reports a crossing once on a short segment, at 90 degrees', () => {
         const graph = new TrackGraph();
         const h = layLine(graph, { x: 0, y: 0 }, { x: 6, y: 0 });
-        const v = layLine(
-            graph,
-            { x: 3, y: -3 },
-            { x: 3, y: 3 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 3, y: -3 }, { x: 3, y: 3 }, 10);
         const crossings = cm(graph).getCrossings(h);
         expect(crossings).toHaveLength(1);
         expect(crossings[0]!.otherSegment).toBe(v);
@@ -81,12 +67,7 @@ describe('getCrossings', () => {
     it('reports a crossing once on a short segment, at 45 degrees', () => {
         const graph = new TrackGraph();
         const h = layLine(graph, { x: 0, y: 0 }, { x: 10, y: 0 });
-        const d = layLine(
-            graph,
-            { x: 0, y: -5 },
-            { x: 10, y: 5 },
-            ELEVATION.ABOVE_1
-        );
+        const d = layLine(graph, { x: 0, y: -5 }, { x: 10, y: 5 }, 10);
         const crossings = cm(graph).getCrossings(h);
         expect(crossings).toHaveLength(1);
         expect(crossings[0]!.otherSegment).toBe(d);
@@ -133,12 +114,7 @@ describe('getCrossings', () => {
     it('forgets a removed segment, and knows nothing of an unknown one', () => {
         const graph = new TrackGraph();
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
         graph.removeTrackSegment(v);
         expect(cm(graph).getCrossings(h)).toEqual([]);
         expect(cm(graph).getCrossings(99)).toEqual([]);

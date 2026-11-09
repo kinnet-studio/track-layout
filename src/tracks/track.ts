@@ -12,7 +12,7 @@ import {
     sameDirection,
 } from '@ue-too/math';
 
-import { LEVEL_HEIGHT } from './constants.js';
+import { isValidHeight, roundHeight } from './heights.js';
 import {
     type SegmentStyle,
     type SegmentStyleChange,
@@ -22,7 +22,6 @@ import {
 import { TrackCurveManager } from './trackcurve-manager.js';
 import { TrackJointManager } from './trackjoint-manager.js';
 import {
-    ELEVATION,
     ProjectionInfo,
     ProjectionJointResult,
     ProjectionResult,
@@ -54,6 +53,14 @@ export function defaultYieldToFrame(): Promise<void> {
     }
     return new Promise(resolve => setTimeout(resolve, 0));
 }
+
+/**
+ * Why TrackGraph.setJointElevation changed nothing: there is no such joint,
+ * the height is outside HEIGHT_MIN to HEIGHT_MAX, or a segment at the joint
+ * is protected.
+ */
+export type JointElevationRefusal =
+    'unknownJoint' | 'outOfRange' | 'protectedSegment';
 
 export type SegmentSplitInfo = {
     oldSegmentNumber: number;
@@ -101,7 +108,7 @@ export class TrackGraph {
         return this._jointManager.getJoints();
     }
 
-    getJoint(jointNumber: number): TrackJoint | null {
+    getJoint(jointNumber: number): TrackJointWithElevation | null {
         return this._jointManager.getJoint(jointNumber);
     }
 
@@ -354,7 +361,8 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            // the segment is flat, so the new joint is at its height
+            elevation: t0Joint.elevation,
         };
 
         const newJointNumber = this._jointManager.createJoint(newJoint);
@@ -553,7 +561,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const newJointNumber = this._jointManager.createJoint(newTrackJoint);
@@ -589,10 +597,15 @@ export class TrackGraph {
         return true;
     }
 
+    /**
+     * Creates a joint with no track at `position`. Its height, in metres, is
+     * rounded to 0.01 m but not clamped: callers keep it within
+     * `HEIGHT_MIN`…`HEIGHT_MAX`, or the saved graph won't validate.
+     */
     createNewEmptyJoint(
         position: Point,
         tangent: Point,
-        elevation: ELEVATION = ELEVATION.GROUND
+        elevation: number = 0
     ): number {
         const newJoint: TrackJointWithElevation = {
             position,
@@ -602,7 +615,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation,
+            elevation: roundHeight(elevation),
         };
         const newJointNumber = this._jointManager.createJoint(newJoint);
         return newJointNumber;
@@ -630,7 +643,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const endJoint: TrackJointWithElevation = {
@@ -641,7 +654,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const startJointNumber = this._jointManager.createJoint(startJoint);
@@ -787,7 +800,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         newTrackJoint.direction.reverseTangent.add(startJointNumber);
@@ -1050,7 +1063,7 @@ export class TrackGraph {
 
     /**
      * Get track segments sorted by elevation for proper drawing order.
-     * SUB_3 elevation segments are drawn first, highest elevation segments are drawn last.
+     * The lowest segments are drawn first, the highest last.
      * For segments with different start/end elevations, uses the minimum elevation for sorting.
      * @returns Track segments sorted by elevation (ascending order)
      */
@@ -1068,7 +1081,7 @@ export class TrackGraph {
 
     /**
      * Get track segments sorted by elevation for proper drawing order.
-     * SUB_3 elevation segments are drawn first, highest elevation segments are drawn last.
+     * The lowest segments are drawn first, the highest last.
      * For segments with different start/end elevations, uses the maximum elevation for sorting.
      * @returns Track segments sorted by elevation (ascending order)
      */
@@ -1086,7 +1099,7 @@ export class TrackGraph {
 
     /**
      * Get track segments sorted by elevation for proper drawing order.
-     * SUB_3 elevation segments are drawn first, highest elevation segments are drawn last.
+     * The lowest segments are drawn first, the highest last.
      * For segments with different start/end elevations, uses the average elevation for sorting.
      * @returns Track segments sorted by elevation (ascending order)
      */
@@ -1350,6 +1363,80 @@ export class TrackGraph {
     }
 
     /**
+     * Moves joint `joint` to `metres`, rounded to 0.01 m, and the end of each
+     * segment that meets it there. The segments keep their numbers and are
+     * rebuilt in place, each firing onSegmentElevationChanged. The laying
+     * rules are not checked, so a junction can be left with a sloped branch.
+     * Returns why nothing changed, or null; a height the joint already has
+     * changes nothing and returns null.
+     *
+     * One event fires per rebuilt segment, as each is rebuilt, so while an
+     * earlier segment's event runs the joint's later segments still hold
+     * their old heights. The graph is fully consistent only once this
+     * returns: a listener that reads neighbouring segments should defer the
+     * read, for example to the next frame.
+     */
+    setJointElevation(
+        joint: number,
+        metres: number
+    ): JointElevationRefusal | null {
+        const elevation = roundHeight(metres);
+        if (!isValidHeight(elevation)) {
+            return 'outOfRange';
+        }
+        const trackJoint = this._jointManager.getJoint(joint);
+        if (trackJoint === null) {
+            return 'unknownJoint';
+        }
+        const segments = [...new Set(trackJoint.connections.values())];
+        if (segments.some(n => this.isSegmentProtected(n))) {
+            return 'protectedSegment';
+        }
+        if (trackJoint.elevation === elevation) {
+            return null;
+        }
+
+        trackJoint.elevation = elevation;
+        for (const segmentNumber of segments) {
+            const segment =
+                this._trackCurveManager.getTrackSegmentWithJoints(
+                    segmentNumber
+                );
+            if (segment === null) {
+                continue;
+            }
+            this._trackCurveManager.setSegmentElevation(segmentNumber, {
+                from:
+                    segment.t0Joint === joint
+                        ? elevation
+                        : segment.elevation.from,
+                to:
+                    segment.t1Joint === joint
+                        ? elevation
+                        : segment.elevation.to,
+            });
+        }
+        this._drawDataDirty = true;
+        return null;
+    }
+
+    /**
+     * Subscribe to segment height changes, such as from setJointElevation.
+     * It fires once per rebuilt segment, before setJointElevation has
+     * rebuilt the joint's other segments, so defer any read of neighbouring
+     * segments until setJointElevation has returned.
+     */
+    onSegmentElevationChanged(
+        callback: (segmentNumber: number) => void,
+        options?: SubscriptionOptions
+    ) {
+        return this._trackCurveManager.onSegmentElevationChanged(
+            callback,
+            options
+        );
+    }
+
+    /**
      * Serializes the entire track graph (joints + segments) into a
      * JSON-safe object suitable for `JSON.stringify`.
      */
@@ -1400,7 +1487,7 @@ export class TrackGraph {
                     tangent: new Set(joint.direction.tangent),
                     reverseTangent: new Set(joint.direction.reverseTangent),
                 },
-                elevation: joint.elevation,
+                elevation: roundHeight(joint.elevation),
             });
         }
 

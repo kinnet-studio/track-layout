@@ -1,7 +1,6 @@
 import type { Point } from '@ue-too/math';
 import { Container, Graphics, MeshSimple, Texture } from 'pixi.js';
 
-import { LEVEL_HEIGHT } from '../index.js';
 import type { StationManager } from '../index.js';
 import type { TrackGraph } from '../index.js';
 import { sampleSpineEdge } from '../index.js';
@@ -230,9 +229,8 @@ export class TrackAlignedPlatformRenderSystem
         container.addChild(drawing);
 
         const key = platformKey(id);
-        const elevationRaw = elevation * LEVEL_HEIGHT;
         const bandIndex =
-            this._worldRenderSystem.getElevationBandIndex(elevationRaw);
+            this._worldRenderSystem.getElevationBandIndex(elevation);
         this._worldRenderSystem.addToBand(
             key,
             container,

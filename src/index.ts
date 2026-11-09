@@ -1,5 +1,6 @@
 export * from './tracks/constants.js';
 export * from './tracks/gauge-presets.js';
+export * from './tracks/heights.js';
 export * from './tracks/joint-direction-preference-map.js';
 export * from './tracks/parallel-spacing.js';
 export * from './tracks/segment-style.js';

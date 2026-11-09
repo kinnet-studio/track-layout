@@ -14,13 +14,8 @@ import type {
     DuplicateHighlightState,
     PreviewDrawData,
 } from '../editing/preview-types.js';
-import { LEVEL_HEIGHT } from '../index.js';
 import { TrackCurveManager } from '../index.js';
 import {
-    ELEVATION,
-    ELEVATION_MAX,
-    ELEVATION_MIN,
-    ELEVATION_VALUES,
     ProjectionPositiveResult,
     TrackSegmentDrawData,
     TrackSegmentWithCollision,
@@ -61,7 +56,11 @@ import {
     type TerrainSampler,
     computeTunnelEntranceGeometry,
 } from './tunnel-geometry.js';
-import { findElevationInterval } from './world-render-system.js';
+import {
+    DETAILED_BAND_HEIGHTS,
+    findElevationInterval,
+    getBandIndexForHeight,
+} from './world-render-system.js';
 
 /** Zoom level above which detailed track draw data is shown; below this only the bezier curve is drawn. */
 const ZOOM_THRESHOLD_DETAILED_TRACK = 5;
@@ -79,14 +78,24 @@ const TRACK_TEX_SIZE = 64;
 const ELEVATION_GRADIENT_WIDTH = 4;
 const ELEVATION_GRADIENT_HEIGHT = 128;
 
-/** Raw elevation range in world units (ELEVATION * LEVEL_HEIGHT). */
-const ELEVATION_RAW_MIN = ELEVATION_MIN * LEVEL_HEIGHT;
-const ELEVATION_RAW_MAX = ELEVATION_MAX * LEVEL_HEIGHT;
+/** Elevation range of the gradient, in metres: the lowest to the highest band. */
+const GRADIENT_MIN_METRES = DETAILED_BAND_HEIGHTS[0];
+const GRADIENT_MAX_METRES =
+    DETAILED_BAND_HEIGHTS[DETAILED_BAND_HEIGHTS.length - 1];
 
-/** Map a raw elevation value to a normalised [0, 1] coordinate into the gradient texture. */
-const normalizeElevation = (rawElevation: number): number =>
-    (rawElevation - ELEVATION_RAW_MIN) /
-    (ELEVATION_RAW_MAX - ELEVATION_RAW_MIN);
+/**
+ * Maps a height in metres to a [0, 1] coordinate into the gradient texture.
+ * Heights outside the end bands clamp to 0 or 1.
+ */
+export const normalizeElevation = (metres: number): number =>
+    Math.min(
+        1,
+        Math.max(
+            0,
+            (metres - GRADIENT_MIN_METRES) /
+                (GRADIENT_MAX_METRES - GRADIENT_MIN_METRES)
+        )
+    );
 
 /** Size of the tiny solid-black texture used for shadow meshes. */
 const SHADOW_TEX_SIZE = 4;
@@ -165,8 +174,8 @@ const lineEndsOf = (
 
 /** A segment's heights in metres, at its two ends. */
 const heightsOf = (segment: TrackSegmentWithCollision): LineHeights => ({
-    from: segment.elevation.from * LEVEL_HEIGHT,
-    to: segment.elevation.to * LEVEL_HEIGHT,
+    from: segment.elevation.from,
+    to: segment.elevation.to,
 });
 
 /**
@@ -562,6 +571,10 @@ export class TrackRenderSystem {
             this._onSegmentStyleChanged.bind(this),
             { signal: this._abortController.signal }
         );
+        this._trackCurveManager.onSegmentElevationChanged(
+            this._onSegmentElevationChanged.bind(this),
+            { signal: this._abortController.signal }
+        );
 
         this._camera = camera;
         this._textureRenderer = options.textureRenderer ?? null;
@@ -619,6 +632,25 @@ export class TrackRenderSystem {
             elevationMesh.visible = this._showElevationGradient;
             solidBallastMesh.visible = !this._showElevationGradient;
         }
+    }
+
+    /**
+     * Redraws what a segment's height change leaves stale. The draw-data
+     * events have already rebuilt its detailed pieces; what is left is what
+     * `_onAddTrackSegment` draws once: the zoomed-out line, the underground
+     * indicator and the line-style drawing, with the crossing marks of the
+     * segments it crosses and is near. Removing and adding the segment
+     * redraws all of them. The model still holds the segment, so the
+     * neighbour redraws on removal see its new heights; the add redraws them
+     * again. New graphics start visible, so the zoom level is applied again.
+     */
+    private _onSegmentElevationChanged(segmentNumber: number): void {
+        const segment =
+            this._trackCurveManager.getTrackSegmentWithJoints(segmentNumber);
+        if (segment === null) return;
+        this._onRemoveTrackSegment(segmentNumber);
+        this._onAddTrackSegment(segmentNumber, segment);
+        this._applyZoomLod(this._camera.zoomLevel);
     }
 
     /**
@@ -1821,8 +1853,7 @@ export class TrackRenderSystem {
         return computeTunnelEntranceGeometry(
             drawData,
             this._terrainData ?? null,
-            rawElevation =>
-                this._worldRenderSystem.getElevationBandIndex(rawElevation)
+            height => this._worldRenderSystem.getElevationBandIndex(height)
         );
     }
 
@@ -1830,7 +1861,7 @@ export class TrackRenderSystem {
      * Build the retaining-wall meshes (two thin parallel strips) for a
      * ramped track that goes below terrain.
      *
-     * Placed in the GROUND band's drawable sublayer.
+     * Placed in the drawable sublayer of the band at the terrain surface.
      */
     private _buildCuttingForDrawData(
         drawData: TrackSegmentDrawData
@@ -1872,7 +1903,8 @@ export class TrackRenderSystem {
      * terrain. The cover spans the full width between the outer wall edges at
      * the underground end of the ramp.
      *
-     * Placed in the GROUND band's onTrack sublayer so it renders above rails.
+     * Placed in the onTrack sublayer of the band at the terrain surface so it
+     * renders above rails.
      */
     private _buildCuttingCoverForDrawData(
         drawData: TrackSegmentDrawData
@@ -1933,10 +1965,9 @@ export class TrackRenderSystem {
         if (elevation.from >= startTerrainH || elevation.to >= endTerrainH)
             return null;
 
-        const rawElevation = Math.max(elevation.from, elevation.to);
+        const height = Math.max(elevation.from, elevation.to);
         return {
-            bandIndex:
-                this._worldRenderSystem.getElevationBandIndex(rawElevation),
+            bandIndex: this._worldRenderSystem.getElevationBandIndex(height),
         };
     }
 
@@ -2474,10 +2505,10 @@ export class TrackRenderSystem {
         const g = new Graphics();
         for (let y = 0; y < ELEVATION_GRADIENT_HEIGHT; y++) {
             const normalizedV = y / (ELEVATION_GRADIENT_HEIGHT - 1);
-            const rawElevation =
-                ELEVATION_RAW_MIN +
-                normalizedV * (ELEVATION_RAW_MAX - ELEVATION_RAW_MIN);
-            const rgb = findElevationColorStop(rawElevation);
+            const metres =
+                GRADIENT_MIN_METRES +
+                normalizedV * (GRADIENT_MAX_METRES - GRADIENT_MIN_METRES);
+            const rgb = findElevationColorStop(metres);
             const color = rgbToHex(rgb);
             g.rect(0, y, ELEVATION_GRADIENT_WIDTH, 1);
             g.fill(color);
@@ -2842,8 +2873,10 @@ export class TrackRenderSystem {
      * then redraws what it was crossing, which loses its deck or gap, the
      * `tunnel` and `bridge` segments at its ends, whose run ends may change,
      * and the segments in reach of it and of what it crossed, which lose what
-     * carried across. The model no longer has the segment, so only what was
-     * recorded about it is used.
+     * carried across. When the segment was removed the model no longer has
+     * it, so only what was recorded about it is used. On a height change
+     * (`_onSegmentElevationChanged`) the model still has it, and the add path
+     * that follows redraws everything again.
      */
     private _forgetLineSegment(curveNumber: number): void {
         const record = this._lineTracks.get(curveNumber);
@@ -2905,12 +2938,11 @@ export class TrackRenderSystem {
 
         const simplifiedTrackGraphics = buildBezierLine(trackSegment.curve);
 
-        const rawElevation = Math.max(
-            trackSegment.elevation.from * LEVEL_HEIGHT,
-            trackSegment.elevation.to * LEVEL_HEIGHT
+        const height = Math.max(
+            trackSegment.elevation.from,
+            trackSegment.elevation.to
         );
-        const bandIndex =
-            this._worldRenderSystem.getElevationBandIndex(rawElevation);
+        const bandIndex = this._worldRenderSystem.getElevationBandIndex(height);
         const bandKey = `__simplified__${curveNumber}`;
         this._worldRenderSystem.addToBand(
             bandKey,
@@ -2934,8 +2966,8 @@ export class TrackRenderSystem {
                 this._terrainData?.getHeight(startPoint.x, startPoint.y) ?? 0;
             const endTerrainH =
                 this._terrainData?.getHeight(endPoint.x, endPoint.y) ?? 0;
-            const startTrackElev = trackSegment.elevation.from * LEVEL_HEIGHT;
-            const endTrackElev = trackSegment.elevation.to * LEVEL_HEIGHT;
+            const startTrackElev = trackSegment.elevation.from;
+            const endTrackElev = trackSegment.elevation.to;
 
             // Track is underground when its elevation is below terrain at that point.
             if (startTrackElev < startTerrainH && endTrackElev < endTerrainH) {
@@ -3097,16 +3129,14 @@ export class TrackRenderSystem {
                 }
 
                 // Place shadow one elevation band below the track so terrain
-                // occlusion at the track's own level properly hides it.
-                // e.g. ABOVE_2 track shadow → ABOVE_1 band; hidden by ABOVE_2+ terrain.
+                // occlusion in the track's own band properly hides it.
+                // e.g. a 20 m track's shadow goes in the 10 m band; hidden by terrain at 20 m or more.
                 const trackBandIndex =
                     this._worldRenderSystem.getElevationBandIndex(
                         Math.max(drawData.elevation.from, drawData.elevation.to)
                     );
                 const shadowBandIndex = Math.max(0, trackBandIndex - 1);
-                const shadowElevation = ELEVATION_VALUES[
-                    shadowBandIndex
-                ] as ELEVATION;
+                const shadowElevation = DETAILED_BAND_HEIGHTS[shadowBandIndex];
                 this._worldRenderSystem.addShadow(
                     key,
                     shadowMesh,
@@ -3133,12 +3163,12 @@ export class TrackRenderSystem {
             this._drawableKeys.add(key);
 
             // Determine band index for this segment.
-            const rawElevation = Math.max(
+            const height = Math.max(
                 drawData.elevation.from,
                 drawData.elevation.to
             );
             const bandIndex =
-                this._worldRenderSystem.getElevationBandIndex(rawElevation);
+                this._worldRenderSystem.getElevationBandIndex(height);
 
             this._worldRenderSystem.addToBand(
                 key,
@@ -3248,12 +3278,12 @@ export class TrackRenderSystem {
         >();
 
         drawDataOrder.forEach(drawData => {
-            const rawElevation = Math.max(
+            const height = Math.max(
                 drawData.elevation.from,
                 drawData.elevation.to
             );
             const bandIndex =
-                this._worldRenderSystem.getElevationBandIndex(rawElevation);
+                this._worldRenderSystem.getElevationBandIndex(height);
             const key = JSON.stringify({
                 trackSegmentNumber:
                     drawData.originalTrackSegment.trackSegmentNumber,
@@ -3928,8 +3958,14 @@ export const interpolateRgb = (a: Rgb, b: Rgb, t: number): Rgb => ({
     b: a.b + (b.b - a.b) * t,
 });
 
-const findElevationColorStop = (elevation: number): Rgb => {
-    const interval = findElevationInterval(elevation);
+/**
+ * The Detailed colour at a height in metres, blended between band colours.
+ * Heights outside the end bands take the end band's colour.
+ */
+export const findElevationColorStop = (metres: number): Rgb => {
+    const interval = findElevationInterval(
+        Math.min(GRADIENT_MAX_METRES, Math.max(GRADIENT_MIN_METRES, metres))
+    );
     if (interval === null) {
         return { r: 0, g: 0, b: 0 };
     }
@@ -3941,27 +3977,20 @@ const findElevationColorStop = (elevation: number): Rgb => {
     );
 };
 
-/** Elevation colors as RGB (0–255) for interpolation. */
-export const getElevationColorRgb = (elevation: ELEVATION): Rgb => {
-    switch (elevation) {
-        case ELEVATION.SUB_3:
-            return { r: 255, g: 0, b: 0 };
-        case ELEVATION.SUB_2:
-            return { r: 255, g: 165, b: 0 };
-        case ELEVATION.SUB_1:
-            return { r: 255, g: 255, b: 0 };
-        case ELEVATION.GROUND:
-            return { r: 0, g: 255, b: 0 };
-        case ELEVATION.ABOVE_1:
-            return { r: 0, g: 255, b: 255 };
-        case ELEVATION.ABOVE_2:
-            return { r: 255, g: 0, b: 255 };
-        case ELEVATION.ABOVE_3:
-            return { r: 0, g: 0, b: 255 };
-        default:
-            return { r: 128, g: 128, b: 128 };
-    }
-};
+/** Colours of the Detailed bands as RGB (0-255), lowest band first. */
+const BAND_COLORS: readonly Rgb[] = [
+    { r: 255, g: 0, b: 0 },
+    { r: 255, g: 165, b: 0 },
+    { r: 255, g: 255, b: 0 },
+    { r: 0, g: 255, b: 0 },
+    { r: 0, g: 255, b: 255 },
+    { r: 255, g: 0, b: 255 },
+    { r: 0, g: 0, b: 255 },
+];
+
+/** The colour of the band for a height in metres, as RGB (0-255). */
+export const getElevationColorRgb = (metres: number): Rgb =>
+    BAND_COLORS[getBandIndexForHeight(metres)];
 
 /** Seeded RNG for deterministic procedural texture (mulberry32-style). */
 function seededRng(seed: number): () => number {

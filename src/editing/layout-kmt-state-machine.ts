@@ -9,7 +9,7 @@ import type {
 import { NO_OP, TemplateState, TemplateStateMachine } from '@ue-too/being';
 import { type Point } from '@ue-too/math';
 
-import { ELEVATION, ProjectionPositiveResult } from '../index.js';
+import { ProjectionPositiveResult } from '../index.js';
 import { NewJointType } from './types.js';
 
 export const LAYOUT_STATES = [
@@ -71,7 +71,7 @@ export interface LayoutContext extends BaseContext {
     hoverForCurveDeletion: (position: Point) => void;
     deleteCurrentCurve: () => void;
     cancelCurrentDeletion: () => void;
-    setCurrentJointElevation: (elevation: ELEVATION) => void;
+    setCurrentJointElevation: (elevation: number) => void;
     bumpCurrentJointElevation: () => void;
     lowerCurrentJointElevation: () => void;
     bumpStartJointElevation: () => void;

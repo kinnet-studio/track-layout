@@ -8,7 +8,7 @@ import { Point, PointCal } from '@ue-too/math';
 
 import { GenericEntityManager } from '../shared/entity-manager.js';
 import { RTree, Rectangle } from '../shared/r-tree.js';
-import { LEVEL_HEIGHT } from './constants.js';
+import { roundHeight } from './heights.js';
 import {
     DEFAULT_SEGMENT_STYLE,
     type SegmentStyle,
@@ -21,7 +21,6 @@ import {
     withStyleDefaults,
 } from './segment-style.js';
 import {
-    ELEVATION,
     ProjectionInfo,
     SerializedTrackSegment,
     TrackSegmentDrawData,
@@ -142,6 +141,8 @@ export class TrackCurveManager {
         new SynchronousObservable<[number]>();
     private _segmentStyleChangedObservable: Observable<[SegmentStyleChange]> =
         new SynchronousObservable<[SegmentStyleChange]>();
+    private _segmentElevationChangedObservable: Observable<[number]> =
+        new SynchronousObservable<[number]>();
 
     /**
      * Extra distance added to gauge-based projection thresholds.
@@ -238,6 +239,88 @@ export class TrackCurveManager {
         options?: SubscriptionOptions
     ) {
         return this._segmentStyleChangedObservable.subscribe(callback, options);
+    }
+
+    /**
+     * Changes the heights at a segment's ends and rebuilds its pieces in
+     * place. The segment keeps its number, curve, gauge, style, collisions,
+     * offsets and R-tree box, and is split again as createCurveWithJoints
+     * splits a new segment. The segments at its own joints, which only touch
+     * it there, are not crossings. Fires the delete event for each old piece
+     * and one add event for the new ones, then onSegmentElevationChanged; no
+     * segment add or remove event. Returns false for an unknown segment.
+     *
+     * Use TrackGraph.setJointElevation instead: it keeps the joint's height
+     * in step with its segments and marks TrackGraph's draw cache dirty.
+     * Calling this directly leaves TrackGraph.getDrawData returning the old
+     * pieces.
+     */
+    setSegmentElevation(
+        segmentNumber: number,
+        elevation: { from: number; to: number }
+    ): boolean {
+        const entity = this._internalTrackCurveManager.getEntity(segmentNumber);
+        if (entity === null) {
+            return false;
+        }
+        const segment = entity.segment;
+        const { curve, t0Joint, t1Joint } = segment;
+        const from = roundHeight(elevation.from);
+        const to = roundHeight(elevation.to);
+
+        const exclude = new Set([
+            segmentNumber,
+            ...this.getSegmentsAtJoint(t0Joint, curve.get(0)),
+            ...this.getSegmentsAtJoint(t1Joint, curve.get(1)),
+        ]);
+        const { insertionT, splits } = this._computeSplits(
+            curve,
+            from,
+            to,
+            exclude
+        );
+        segment.elevation = { from, to };
+        segment.splits = insertionT;
+        segment.splitCurves = splits;
+
+        // The R-tree entry is a copy of the segment with its old heights and
+        // pieces, so it is replaced.
+        const treeEntry = this._treeEntryFor(segmentNumber, curve);
+        if (treeEntry === undefined) {
+            console.warn('track segment tree entry not found');
+        } else {
+            this._internalRTree.removeByData(treeEntry);
+        }
+        const aabb = curve.AABB;
+        this._internalRTree.insert(
+            new Rectangle(aabb.min.x, aabb.min.y, aabb.max.x, aabb.max.y),
+            { ...segment, trackSegmentNumber: segmentNumber }
+        );
+
+        this._removePieces(segmentNumber);
+        this._addObservable.notify(
+            -1,
+            this._insertPieces(segmentNumber, segment)
+        );
+        this._drawDataDirty = true;
+        this._segmentElevationChangedObservable.notify(segmentNumber);
+        return true;
+    }
+
+    /**
+     * Subscribe to height changes made with setSegmentElevation. It fires
+     * once per segment; when TrackGraph.setJointElevation rebuilds several,
+     * the later ones still hold their old heights while an earlier one's
+     * event runs, so defer any read of neighbouring segments.
+     */
+    onSegmentElevationChanged(
+        callback: (segmentNumber: number) => void,
+        options?: SubscriptionOptions
+    ) {
+        return this._segmentElevationChangedObservable.subscribe(
+            callback,
+            options
+        );
     }
 
     private _treeEntryFor(
@@ -609,12 +692,8 @@ export class TrackCurveManager {
                         const elevation = curveIsSloped
                             ? getElevationAtT(res.tVal, {
                                   elevation: {
-                                      from:
-                                          trackSegment.elevation.from *
-                                          LEVEL_HEIGHT,
-                                      to:
-                                          trackSegment.elevation.to *
-                                          LEVEL_HEIGHT,
+                                      from: trackSegment.elevation.from,
+                                      to: trackSegment.elevation.to,
                                   },
                               })
                             : trackSegment.elevation.from;
@@ -678,12 +757,8 @@ export class TrackCurveManager {
                         const elevation = curveIsSloped
                             ? getElevationAtT(res.tVal, {
                                   elevation: {
-                                      from:
-                                          trackSegment.elevation.from *
-                                          LEVEL_HEIGHT,
-                                      to:
-                                          trackSegment.elevation.to *
-                                          LEVEL_HEIGHT,
+                                      from: trackSegment.elevation.from,
+                                      to: trackSegment.elevation.to,
                                   },
                               })
                             : trackSegment.elevation.from;
@@ -750,10 +825,8 @@ export class TrackCurveManager {
                     const elevation = curveIsSloped
                         ? getElevationAtT(res.tVal, {
                               elevation: {
-                                  from:
-                                      trackSegment.elevation.from *
-                                      LEVEL_HEIGHT,
-                                  to: trackSegment.elevation.to * LEVEL_HEIGHT,
+                                  from: trackSegment.elevation.from,
+                                  to: trackSegment.elevation.to,
                               },
                           })
                         : trackSegment.elevation.from;
@@ -776,12 +849,18 @@ export class TrackCurveManager {
         return projectionInfo;
     }
 
+    /**
+     * Lays a segment between two joints and splits it at the crossings its
+     * heights make. The end heights, in metres, are rounded to 0.01 m but
+     * not clamped: callers keep them within `HEIGHT_MIN`…`HEIGHT_MAX`, or
+     * the saved graph won't validate.
+     */
     createCurveWithJoints(
         curve: BCurve,
         t0Joint: number,
         t1Joint: number,
-        t0Elevation: ELEVATION,
-        t1Elevation: ELEVATION,
+        t0Elevation: number,
+        t1Elevation: number,
         gauge: number = 1.067,
         excludeSegmentsForCollisionCheck: Set<number> = new Set(),
         /** Style for the new segment; defaults to the new-segment style. Splits pass the parent's style. */
@@ -789,6 +868,8 @@ export class TrackCurveManager {
             this._newSegmentStyle
         )
     ): number {
+        t0Elevation = roundHeight(t0Elevation);
+        t1Elevation = roundHeight(t1Elevation);
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
         const aabb = curve.AABB;
@@ -827,135 +908,12 @@ export class TrackCurveManager {
                 collisions.push(...intersections);
             });
 
-        let startT = 0;
-
-        const insertionT: number[] = [];
-        const collisionT: number[] = [];
-
-        if (t0Elevation !== t1Elevation) {
-            // the new curve is sloped
-            const internalIntersections = this.checkForCollisions(
-                curve,
-                excludeSegmentsForCollisionCheck
-            );
-
-            internalIntersections
-                .sort((a, b) => a.selfT - b.selfT)
-                .forEach(intersection => {
-                    collisionT.push(intersection.selfT);
-                    const insertT =
-                        Math.round(((intersection.selfT + startT) / 2) * 100) /
-                        100;
-                    insertionT.push(insertT);
-                    startT = intersection.selfT;
-                });
-        } else {
-            // the new curve is flat
-            const internalIntersections = this.checkForCollisions(
-                curve,
-                excludeSegmentsForCollisionCheck,
-                true
-            );
-
-            internalIntersections
-                .sort((a, b) => a.selfT - b.selfT)
-                .forEach(intersection => {
-                    collisionT.push(intersection.selfT);
-                    const insertT =
-                        Math.round(((intersection.selfT + startT) / 2) * 100) /
-                        100;
-                    insertionT.push(insertT);
-                    startT = intersection.selfT;
-                });
-        }
-
-        startT = 0;
-
-        const splits: TrackSegmentSplit[] = [];
-
-        if (insertionT.length === 0) {
-            splits.push({
-                curve: curve,
-                elevation: {
-                    from: t0Elevation * LEVEL_HEIGHT,
-                    to: t1Elevation * LEVEL_HEIGHT,
-                },
-                tValInterval: { start: 0, end: 1 },
-            });
-        } else {
-            {
-                const [startingCurve, _] = curve.splitIntoCurves(insertionT[0]);
-                const startElevation = getElevationAtT(startT, {
-                    elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
-                    },
-                });
-                const endElevation = getElevationAtT(insertionT[0], {
-                    elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
-                    },
-                });
-                splits.push({
-                    curve: startingCurve,
-                    elevation: { from: startElevation, to: endElevation },
-                    tValInterval: { start: 0, end: insertionT[0] },
-                });
-            }
-
-            for (let i = 0; i < insertionT.length - 1; i++) {
-                const tVal = insertionT[i];
-                const nextTVal = insertionT[i + 1];
-                const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
-                const startElevation = getElevationAtT(tVal, {
-                    elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
-                    },
-                });
-                const endElevation = getElevationAtT(nextTVal, {
-                    elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
-                    },
-                });
-                splits.push({
-                    curve: secondCurve,
-                    elevation: { from: startElevation, to: endElevation },
-                    tValInterval: { start: tVal, end: nextTVal },
-                });
-            }
-
-            {
-                const [_, endingCurve] = curve.splitIntoCurves(
-                    insertionT[insertionT.length - 1]
-                );
-                const startElevation = getElevationAtT(
-                    insertionT[insertionT.length - 1],
-                    {
-                        elevation: {
-                            from: t0Elevation * LEVEL_HEIGHT,
-                            to: t1Elevation * LEVEL_HEIGHT,
-                        },
-                    }
-                );
-                const endElevation = getElevationAtT(1, {
-                    elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
-                    },
-                });
-                splits.push({
-                    curve: endingCurve,
-                    elevation: { from: startElevation, to: endElevation },
-                    tValInterval: {
-                        start: insertionT[insertionT.length - 1],
-                        end: 1,
-                    },
-                });
-            }
-        }
+        const { insertionT, splits } = this._computeSplits(
+            curve,
+            t0Elevation,
+            t1Elevation,
+            excludeSegmentsForCollisionCheck
+        );
 
         const trackSegmentEntry: TrackSegmentWithCollision = {
             curve: curve,
@@ -985,16 +943,117 @@ export class TrackCurveManager {
             trackSegmentNumber: curveNumber,
         };
 
-        const drawDataForSplits: (TrackSegmentDrawData & {
-            positiveOffsets: Point[];
-            negativeOffsets: Point[];
-        })[] = [];
+        const drawDataForSplits = this._insertPieces(
+            curveNumber,
+            trackSegmentEntry
+        );
 
-        splits.forEach(split => {
+        this._addObservable.notify(-1, drawDataForSplits);
+
+        this._internalRTree.insert(aabbRectangle, trackSegmentTreeEntry);
+        this._drawDataDirty = true;
+        this._addTrackSegmentObservable.notify(curveNumber, trackSegmentEntry);
+        return curveNumber;
+    }
+
+    /**
+     * Where a segment along `curve` from height `from` to `to` is split, and
+     * its pieces. A flat segment is split only where a sloped segment crosses
+     * it, a sloped one at every crossing. Each split is halfway between a
+     * crossing and the one before it, rounded to 0.01. The segments in
+     * `exclude` are not crossings.
+     */
+    private _computeSplits(
+        curve: BCurve,
+        from: number,
+        to: number,
+        exclude: Set<number>
+    ): { insertionT: number[]; splits: TrackSegmentSplit[] } {
+        const insertionT: number[] = [];
+        let startT = 0;
+        this.checkForCollisions(curve, exclude, from === to)
+            .sort((a, b) => a.selfT - b.selfT)
+            .forEach(intersection => {
+                insertionT.push(
+                    Math.round(((intersection.selfT + startT) / 2) * 100) / 100
+                );
+                startT = intersection.selfT;
+            });
+
+        const heights = { elevation: { from, to } };
+        const splits: TrackSegmentSplit[] = [];
+
+        if (insertionT.length === 0) {
+            splits.push({
+                curve: curve,
+                elevation: { from, to },
+                tValInterval: { start: 0, end: 1 },
+            });
+        } else {
+            {
+                const [startingCurve, _] = curve.splitIntoCurves(insertionT[0]);
+                const startElevation = getElevationAtT(0, heights);
+                const endElevation = getElevationAtT(insertionT[0], heights);
+                splits.push({
+                    curve: startingCurve,
+                    elevation: { from: startElevation, to: endElevation },
+                    tValInterval: { start: 0, end: insertionT[0] },
+                });
+            }
+
+            for (let i = 0; i < insertionT.length - 1; i++) {
+                const tVal = insertionT[i];
+                const nextTVal = insertionT[i + 1];
+                const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
+                const startElevation = getElevationAtT(tVal, heights);
+                const endElevation = getElevationAtT(nextTVal, heights);
+                splits.push({
+                    curve: secondCurve,
+                    elevation: { from: startElevation, to: endElevation },
+                    tValInterval: { start: tVal, end: nextTVal },
+                });
+            }
+
+            {
+                const [_, endingCurve] = curve.splitIntoCurves(
+                    insertionT[insertionT.length - 1]
+                );
+                const startElevation = getElevationAtT(
+                    insertionT[insertionT.length - 1],
+                    heights
+                );
+                const endElevation = getElevationAtT(1, heights);
+                splits.push({
+                    curve: endingCurve,
+                    elevation: { from: startElevation, to: endElevation },
+                    tValInterval: {
+                        start: insertionT[insertionT.length - 1],
+                        end: 1,
+                    },
+                });
+            }
+        }
+
+        return { insertionT, splits };
+    }
+
+    /**
+     * Adds the draw data of each of segment `segmentNumber`'s pieces to the
+     * persisted draw data, in draw order, and returns it. The caller fires
+     * the add event.
+     */
+    private _insertPieces(
+        segmentNumber: number,
+        segment: TrackSegmentWithCollision
+    ): (TrackSegmentDrawData & {
+        positiveOffsets: Point[];
+        negativeOffsets: Point[];
+    })[] {
+        return segment.splitCurves.map(split => {
             const drawDataForSplit = makeTrackSegmentDrawDataFromSplit(
                 split,
-                trackSegmentEntry,
-                curveNumber
+                segment,
+                segmentNumber
             ) as TrackSegmentDrawData & {
                 positiveOffsets: Point[];
                 negativeOffsets: Point[];
@@ -1003,7 +1062,7 @@ export class TrackCurveManager {
             drawDataForSplit.callback = ((index: number) => {
                 this._trackOrderMap.set(
                     JSON.stringify({
-                        trackSegmentNumber: curveNumber,
+                        trackSegmentNumber: segmentNumber,
                         tValInterval: split.tValInterval,
                     }),
                     index
@@ -1014,15 +1073,33 @@ export class TrackCurveManager {
                 drawDataForSplit
             );
             this._persistedDrawData.splice(insertIndex, 0, drawDataForSplit);
-            drawDataForSplits.push(drawDataForSplit);
+            return drawDataForSplit;
+        });
+    }
+
+    /**
+     * Drops segment `segmentNumber`'s pieces from the persisted draw data
+     * and fires the delete event for each.
+     */
+    private _removePieces(segmentNumber: number): void {
+        const removedKeys: string[] = [];
+        this._persistedDrawData = this._persistedDrawData.filter(entry => {
+            if (
+                entry.originalTrackSegment.trackSegmentNumber === segmentNumber
+            ) {
+                const key = JSON.stringify({
+                    trackSegmentNumber: segmentNumber,
+                    tValInterval: entry.originalTrackSegment.tValInterval,
+                });
+                removedKeys.push(key);
+                return false;
+            }
+            return true;
         });
 
-        this._addObservable.notify(-1, drawDataForSplits);
-
-        this._internalRTree.insert(aabbRectangle, trackSegmentTreeEntry);
-        this._drawDataDirty = true;
-        this._addTrackSegmentObservable.notify(curveNumber, trackSegmentEntry);
-        return curveNumber;
+        for (const key of removedKeys) {
+            this._deleteObservable.notify(key);
+        }
     }
 
     destroyCurve(curveNumber: number): void {
@@ -1043,30 +1120,14 @@ export class TrackCurveManager {
         this._internalRTree.removeByData(trackSegmentTreeEntry);
         this._internalTrackCurveManager.destroyEntity(curveNumber);
         this._drawDataDirty = true;
-
-        const removedKeys: string[] = [];
-        this._persistedDrawData = this._persistedDrawData.filter(entry => {
-            if (entry.originalTrackSegment.trackSegmentNumber === curveNumber) {
-                const key = JSON.stringify({
-                    trackSegmentNumber: curveNumber,
-                    tValInterval: entry.originalTrackSegment.tValInterval,
-                });
-                removedKeys.push(key);
-                return false;
-            }
-            return true;
-        });
-
-        for (const key of removedKeys) {
-            this._deleteObservable.notify(key);
-        }
+        this._removePieces(curveNumber);
         this._removeTrackSegmentObservable.notify(curveNumber);
     }
 
     getPreviewDrawData(
         curve: BCurve,
-        t0Elevation: ELEVATION,
-        t1Elevation: ELEVATION,
+        t0Elevation: number,
+        t1Elevation: number,
         gauge: number = 1.067,
         excludeSegmentsForCollisionCheck: Set<number> = new Set()
     ): {
@@ -1076,6 +1137,8 @@ export class TrackCurveManager {
             negativeOffsets: Point[];
         };
     }[] {
+        t0Elevation = roundHeight(t0Elevation);
+        t1Elevation = roundHeight(t1Elevation);
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
         const aabb = curve.AABB;
@@ -1164,8 +1227,8 @@ export class TrackCurveManager {
             splits.push({
                 curve: curve,
                 elevation: {
-                    from: t0Elevation * LEVEL_HEIGHT,
-                    to: t1Elevation * LEVEL_HEIGHT,
+                    from: t0Elevation,
+                    to: t1Elevation,
                 },
                 tValInterval: { start: 0, end: 1 },
             });
@@ -1174,14 +1237,14 @@ export class TrackCurveManager {
                 const [startingCurve, _] = curve.splitIntoCurves(insertionT[0]);
                 const startElevation = getElevationAtT(startT, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(insertionT[0], {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1197,14 +1260,14 @@ export class TrackCurveManager {
                 const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
                 const startElevation = getElevationAtT(tVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(nextTVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1222,15 +1285,15 @@ export class TrackCurveManager {
                     insertionT[insertionT.length - 1],
                     {
                         elevation: {
-                            from: t0Elevation * LEVEL_HEIGHT,
-                            to: t1Elevation * LEVEL_HEIGHT,
+                            from: t0Elevation,
+                            to: t1Elevation,
                         },
                     }
                 );
                 const endElevation = getElevationAtT(1, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1400,13 +1463,15 @@ export class TrackCurveManager {
         curve: BCurve,
         t0Joint: number,
         t1Joint: number,
-        t0Elevation: ELEVATION,
-        t1Elevation: ELEVATION,
+        t0Elevation: number,
+        t1Elevation: number,
         gauge: number,
         splitTValues: number[],
         /** Saved style; missing fields get the defaults. */
         style: SegmentStyleFields = {}
     ): void {
+        t0Elevation = roundHeight(t0Elevation);
+        t1Elevation = roundHeight(t1Elevation);
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
         const aabb = curve.AABB;
@@ -1445,8 +1510,8 @@ export class TrackCurveManager {
             splits.push({
                 curve: curve,
                 elevation: {
-                    from: t0Elevation * LEVEL_HEIGHT,
-                    to: t1Elevation * LEVEL_HEIGHT,
+                    from: t0Elevation,
+                    to: t1Elevation,
                 },
                 tValInterval: { start: 0, end: 1 },
             });
@@ -1457,14 +1522,14 @@ export class TrackCurveManager {
                 );
                 const startElevation = getElevationAtT(0, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(splitTValues[0], {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1480,14 +1545,14 @@ export class TrackCurveManager {
                 const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
                 const startElevation = getElevationAtT(tVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(nextTVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1505,15 +1570,15 @@ export class TrackCurveManager {
                     splitTValues[splitTValues.length - 1],
                     {
                         elevation: {
-                            from: t0Elevation * LEVEL_HEIGHT,
-                            to: t1Elevation * LEVEL_HEIGHT,
+                            from: t0Elevation,
+                            to: t1Elevation,
                         },
                     }
                 );
                 const endElevation = getElevationAtT(1, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({

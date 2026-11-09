@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackAlignedPlatformManager } from '../src/stations/track-aligned-platform-manager.js';
 import type { TrackAlignedPlatform } from '../src/stations/track-aligned-platform-types.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -13,7 +12,7 @@ function makeStation(name: string) {
     return {
         name,
         position: { x: 0, y: 0 },
-        elevation: ELEVATION.GROUND,
+        elevation: 0,
         platforms: [],
         trackSegments: [],
         joints: [],
@@ -149,7 +148,7 @@ describe('StationManager — serialization with trackAlignedPlatforms', () => {
                     id: 0,
                     name: 'Old Station',
                     position: { x: 0, y: 0 },
-                    elevation: ELEVATION.GROUND,
+                    elevation: 0,
                     platforms: [],
                     trackSegments: [],
                     joints: [],

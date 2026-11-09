@@ -20,6 +20,7 @@ import type {
 
 const RUNTIME_EXPORTS = [
     'WorldRenderSystem',
+    'DETAILED_BAND_HEIGHTS',
     'findElevationInterval',
     'TrackRenderSystem',
     'StationRenderSystem',

@@ -9,7 +9,6 @@ import { computePlatformOffset } from '../src/stations/platform-offset.js';
 import { createIslandStation } from '../src/stations/station-factory.js';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import { RecordingPreview, identity } from './station-placement-helpers.js';
 
 /** An 8 m island's track spacing, its edges `offset` from the tracks. */
@@ -69,7 +68,7 @@ describe('island station placement', () => {
         expect(created).toHaveLength(1);
         const { station } = created[0];
         expect(station.position).toEqual({ x: 50, y: 0 });
-        expect(station.elevation).toBe(ELEVATION.GROUND);
+        expect(station.elevation).toBe(0);
         expect(station.platforms).toHaveLength(2);
         expect(station.trackSegments).toHaveLength(2);
         expect(station.joints).toHaveLength(4);
@@ -180,7 +179,7 @@ describe('createIslandStation', () => {
             position: { x: 0, y: 0 },
             direction: { x: 1, y: 0 },
             length: 100,
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
             gauge: 1.676,
         });
 
@@ -201,7 +200,7 @@ describe('createIslandStation', () => {
             position: { x: 0, y: 0 },
             direction: { x: 1, y: 0 },
             length: 100,
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
             trackSpacing: 10.4,
             platformOffset: 1.2,
         });

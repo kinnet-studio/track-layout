@@ -1,10 +1,9 @@
 import { AABBIntersects, offset2 } from '@ue-too/curve';
 import { Point } from '@ue-too/math';
 
-import { LEVEL_HEIGHT, VERTICAL_CLEARANCE } from './constants.js';
+import { VERTICAL_CLEARANCE } from './constants.js';
 import { TrackJointManager } from './trackjoint-manager.js';
 import {
-    ELEVATION,
     TrackSegmentDrawData,
     TrackSegmentSplit,
     TrackSegmentWithCollision,
@@ -13,7 +12,7 @@ import {
 
 export function getElevationAtT(
     t: number,
-    trackSegment: { elevation: { from: number; to: number } } // this is the elevation height evaluated using the LEVEL_HEIGHT constant and the ELEVATION enum
+    trackSegment: { elevation: { from: number; to: number } } // heights in metres
 ): number {
     const startElevationLevel = trackSegment.elevation.from;
     const endElevationLevel = trackSegment.elevation.to;
@@ -42,7 +41,7 @@ export function trackIsSlopedByJoints(
 }
 
 export function trackIsSloped(trackSegment: {
-    elevation: { from: ELEVATION; to: ELEVATION };
+    elevation: { from: number; to: number };
 }): boolean {
     return trackSegment.elevation.from !== trackSegment.elevation.to;
 }
@@ -56,20 +55,20 @@ export function satisfiesVerticalClearance(elevation: number): boolean {
 
 export function intersectionSatisfiesVerticalClearance(
     intersectionTVal: number,
-    trackSegment: { elevation: { from: ELEVATION; to: ELEVATION } },
+    trackSegment: { elevation: { from: number; to: number } },
     intersectionTVal2: number,
-    trackSegment2: { elevation: { from: ELEVATION; to: ELEVATION } }
+    trackSegment2: { elevation: { from: number; to: number } }
 ): boolean {
     const elevation1 = getElevationAtT(intersectionTVal, {
         elevation: {
-            from: trackSegment.elevation.from * LEVEL_HEIGHT,
-            to: trackSegment.elevation.to * LEVEL_HEIGHT,
+            from: trackSegment.elevation.from,
+            to: trackSegment.elevation.to,
         },
     });
     const elevation2 = getElevationAtT(intersectionTVal2, {
         elevation: {
-            from: trackSegment2.elevation.from * LEVEL_HEIGHT,
-            to: trackSegment2.elevation.to * LEVEL_HEIGHT,
+            from: trackSegment2.elevation.from,
+            to: trackSegment2.elevation.to,
         },
     });
 
@@ -79,8 +78,8 @@ export function intersectionSatisfiesVerticalClearance(
 }
 
 export function elevationIntervalOverlaps(
-    track1: { elevation: { from: ELEVATION; to: ELEVATION } },
-    track2: { elevation: { from: ELEVATION; to: ELEVATION } }
+    track1: { elevation: { from: number; to: number } },
+    track2: { elevation: { from: number; to: number } }
 ): boolean {
     const t1Min = Math.min(track1.elevation.from, track1.elevation.to);
     const t1Max = Math.max(track1.elevation.from, track1.elevation.to);
@@ -130,14 +129,14 @@ export const orderTest = (a: TrackSegmentDrawData, b: TrackSegmentDrawData) => {
     }
     const aElevation = getElevationAtT(collision[0].selfT, {
         elevation: {
-            from: a.elevation.from * LEVEL_HEIGHT,
-            to: a.elevation.to * LEVEL_HEIGHT,
+            from: a.elevation.from,
+            to: a.elevation.to,
         },
     });
     const bElevation = getElevationAtT(collision[0].otherT, {
         elevation: {
-            from: b.elevation.from * LEVEL_HEIGHT,
-            to: b.elevation.to * LEVEL_HEIGHT,
+            from: b.elevation.from,
+            to: b.elevation.to,
         },
     });
     return aElevation - bElevation;
@@ -183,14 +182,14 @@ export const orderTestWithoutCollisionCheck = (
     }
     const aElevation = getElevationAtT(collision[0].selfT, {
         elevation: {
-            from: a.elevation.from * LEVEL_HEIGHT,
-            to: a.elevation.to * LEVEL_HEIGHT,
+            from: a.elevation.from,
+            to: a.elevation.to,
         },
     });
     const bElevation = getElevationAtT(collision[0].otherT, {
         elevation: {
-            from: b.elevation.from * LEVEL_HEIGHT,
-            to: b.elevation.to * LEVEL_HEIGHT,
+            from: b.elevation.from,
+            to: b.elevation.to,
         },
     });
     return aElevation - bElevation;

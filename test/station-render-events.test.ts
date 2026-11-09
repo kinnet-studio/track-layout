@@ -8,7 +8,6 @@ import { StationManager } from '../src/stations/station-manager.js';
 import { TrackAlignedPlatformManager } from '../src/stations/track-aligned-platform-manager.js';
 import type { TrackAlignedPlatform } from '../src/stations/track-aligned-platform-types.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import { RecordingLayerHost, textureRenderer } from './pixi-helpers.js';
 import { bareStation, layTrack } from './station-placement-helpers.js';
 
@@ -81,7 +80,7 @@ function scene() {
     };
 }
 
-function station(elevation: ELEVATION = ELEVATION.GROUND) {
+function station(elevation: number = 0) {
     return { ...bareStation({ x: 0, y: 0 }), elevation };
 }
 
@@ -97,7 +96,7 @@ describe('station and platform renderers follow their managers', () => {
 
     it("draws a platform at its station's elevation, or at ground without one", () => {
         const { host, stations, platforms } = scene();
-        const stationId = stations.createStation(station(ELEVATION.ABOVE_1));
+        const stationId = stations.createStation(station(10));
 
         const id = platforms.createPlatform(platformFor(stationId));
         const orphan = platforms.createPlatform(platformFor(99));
@@ -135,7 +134,7 @@ describe('station and platform renderers follow their managers', () => {
             stations.destroyStation(id);
         }
         stations.createStationWithId(4, {
-            ...station(ELEVATION.ABOVE_1),
+            ...station(10),
             id: 4,
         });
         for (const { id } of platforms.getAllPlatforms()) {
@@ -179,7 +178,7 @@ describe('station and platform renderers built over existing content', () => {
         ]);
         const stations = new StationManager();
         const platforms = new TrackAlignedPlatformManager();
-        const stationId = stations.createStation(station(ELEVATION.ABOVE_1));
+        const stationId = stations.createStation(station(10));
         const platformId = platforms.createPlatform(platformFor(stationId));
 
         new StationRenderSystem(host, stations, graph, textureRenderer);

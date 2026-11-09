@@ -1,7 +1,5 @@
 import type { Point } from '@ue-too/math';
 
-import type { ELEVATION } from '../tracks/types.js';
-
 /** Direction a train can travel along a track segment. */
 export type TrackDirection = 'tangent' | 'reverseTangent';
 
@@ -38,7 +36,7 @@ export type Station = {
     name: string;
     /** World-space position of the station, set at placement time. */
     position: Point;
-    elevation: ELEVATION;
+    elevation: number;
     platforms: Platform[];
     /** IDs of track segments owned by this station. */
     trackSegments: number[];
@@ -72,7 +70,7 @@ export type SerializedStation = {
     id: number;
     name: string;
     position: { x: number; y: number };
-    elevation: ELEVATION;
+    elevation: number;
     platforms: SerializedPlatform[];
     trackSegments: number[];
     joints: number[];

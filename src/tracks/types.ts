@@ -1,33 +1,9 @@
 import { BCurve, Point } from '@ue-too/curve';
 
+import { isValidHeight } from './heights.js';
+
 /** Visual style applied to track rendering. */
 export type TrackStyle = 'ballasted' | 'slab';
-
-export enum ELEVATION {
-    SUB_3 = -3,
-    SUB_2,
-    SUB_1,
-    GROUND,
-    ABOVE_1,
-    ABOVE_2,
-    ABOVE_3,
-}
-
-/** Sorted numeric values of ELEVATION (min first). Derived at runtime so new enum members (e.g. SUB_4 = -4) are included. */
-export const ELEVATION_VALUES: number[] = (
-    Object.values(ELEVATION).filter(
-        (v): v is number => typeof v === 'number'
-    ) as ELEVATION[]
-).sort((a, b) => a - b);
-
-/** Minimum ELEVATION value. Use this instead of hardcoding so adding lower levels (e.g. SUB_4) stays correct. */
-export const ELEVATION_MIN: ELEVATION = (ELEVATION_VALUES[0] ??
-    ELEVATION.SUB_3) as ELEVATION;
-
-/** Maximum ELEVATION value. Use this instead of hardcoding so adding higher levels stays correct. */
-export const ELEVATION_MAX: ELEVATION = (ELEVATION_VALUES[
-    ELEVATION_VALUES.length - 1
-] ?? ELEVATION.ABOVE_3) as ELEVATION;
 
 /** Line styles the `centerline` and `rails` render styles recognise. */
 export const LINE_PRESETS = ['tunnel', 'bridge', 'planned', 'disused'] as const;
@@ -74,8 +50,8 @@ export type TrackSegment = {
 
 export type TrackSegmentWithElevation = TrackSegment & {
     elevation: {
-        from: ELEVATION; // this is the resulting elevation: result = base (terrain) + track elevation
-        to: ELEVATION;
+        from: number; // this is the resulting elevation: result = base (terrain) + track elevation
+        to: number;
     };
 };
 
@@ -90,7 +66,7 @@ export type TrackJoint = {
 };
 
 export type TrackJointWithElevation = TrackJoint & {
-    elevation: ELEVATION; // this is the resulting elevation: result = base (terrain) + joint elevation
+    elevation: number; // this is the resulting elevation: result = base (terrain) + joint elevation
 };
 
 export type TrackSegmentWithCollision = TrackSegmentWithElevation & {
@@ -120,8 +96,8 @@ export type TrackSegmentDrawData = {
         to: number;
     };
     originalElevation: {
-        from: ELEVATION;
-        to: ELEVATION;
+        from: number;
+        to: number;
     };
     excludeSegmentsForCollisionCheck: Set<number>;
     /** Visual style for this track segment. Defaults to 'ballasted' if not set. */
@@ -140,7 +116,7 @@ export type TrackSegmentDrawData = {
 
 export type TrackSegmentSplit = {
     curve: BCurve;
-    elevation: { from: number; to: number }; // the elevation is evaluated using the LEVEL_HEIGHT constant and the ELEVATION enum
+    elevation: { from: number; to: number }; // heights in metres
     tValInterval: { start: number; end: number }; // the tVal interval for the split segment in the original track segment curve
 };
 
@@ -171,7 +147,7 @@ export type SlopedElevation = {
 
 export type FlatElevation = {
     curveIsSloped: false;
-    elevation: ELEVATION;
+    elevation: number;
 };
 
 export type ProjectionResult = ProjectionFalseResult | ProjectionPositiveResult;
@@ -206,8 +182,8 @@ export type PointOnJointPositiveResult = {};
 export type TrackSegmentRTreeEntry = {
     segmentNumber: number;
     elevation: {
-        from: ELEVATION;
-        to: ELEVATION;
+        from: number;
+        to: number;
     };
     t0Joint: number;
     t1Joint: number;
@@ -226,7 +202,7 @@ export type SerializedTrackJoint = {
         tangent: number[];
         reverseTangent: number[];
     };
-    elevation: ELEVATION;
+    elevation: number;
 };
 
 /**
@@ -239,7 +215,7 @@ export type SerializedTrackSegment = {
     controlPoints: Point[];
     t0Joint: number;
     t1Joint: number;
-    elevation: { from: ELEVATION; to: ELEVATION };
+    elevation: { from: number; to: number };
     gauge: number;
     splits: number[];
     trackStyle?: TrackStyle;
@@ -324,10 +300,10 @@ export function validateSerializedTrackData(
                 };
             }
         }
-        if (typeof j.elevation !== 'number') {
+        if (!isValidHeight(j.elevation)) {
             return {
                 valid: false,
-                error: `${prefix}.elevation must be a number`,
+                error: `${prefix}.elevation must be a finite height within -200 to 200 m`,
             };
         }
         if (j.direction == null || typeof j.direction !== 'object') {
@@ -424,10 +400,10 @@ export function validateSerializedTrackData(
             };
         }
         const elev = s.elevation as Record<string, unknown>;
-        if (typeof elev.from !== 'number' || typeof elev.to !== 'number') {
+        if (!isValidHeight(elev.from) || !isValidHeight(elev.to)) {
             return {
                 valid: false,
-                error: `${prefix}.elevation.from and .to must be numbers`,
+                error: `${prefix}.elevation must be a finite height within -200 to 200 m`,
             };
         }
 

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
 import { type SegmentSplitInfo, TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import { layLine } from './track-helpers.js';
 
 const EAST = { x: 1, y: 0 };
@@ -114,16 +113,8 @@ describe('TrackGraph.insertJointIntoTrackSegmentUsingTrackNumber', () => {
 
     it('refuses to split a sloped segment', () => {
         const graph = new TrackGraph();
-        const a = graph.createNewEmptyJoint(
-            { x: 0, y: 0 },
-            EAST,
-            ELEVATION.GROUND
-        );
-        const b = graph.createNewEmptyJoint(
-            { x: 100, y: 0 },
-            EAST,
-            ELEVATION.ABOVE_1
-        );
+        const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, EAST, 0);
+        const b = graph.createNewEmptyJoint({ x: 100, y: 0 }, EAST, 10);
         graph.connectJoints(a, b, [{ x: 50, y: 0 }]);
         const ab = graph.getJoint(a)!.connections.get(b)!;
         let splits = 0;
@@ -155,6 +146,26 @@ describe('TrackGraph.insertJointIntoTrackSegment', () => {
         expect(splits).toBe(1);
         expect(graph.getTrackSegmentWithJoints(ab)).toBeNull();
         expect(graph.getJoint(a)!.connections.has(b)).toBe(false);
+    });
+
+    it("gives the new joint the flat segment's height", () => {
+        const graph = new TrackGraph();
+        const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, EAST, 10);
+        const b = graph.createNewEmptyJoint({ x: 100, y: 0 }, EAST, 10);
+        graph.connectJoints(a, b, [{ x: 50, y: 0 }]);
+        const events: SegmentSplitInfo[] = [];
+        graph.onSegmentSplit(info => events.push(info));
+
+        const m = graph.insertJointIntoTrackSegment(a, b, 0.5)!;
+
+        expect(graph.jointManager.getJoint(m)!.elevation).toBe(10);
+        const { firstNewSegment, secondNewSegment } = events[0];
+        for (const half of [firstNewSegment, secondNewSegment]) {
+            expect(
+                graph.trackCurveManager.getTrackSegmentWithJoints(half)!
+                    .elevation
+            ).toEqual({ from: 10, to: 10 });
+        }
     });
 });
 

@@ -8,7 +8,6 @@ import {
     Texture,
 } from 'pixi.js';
 
-import type { ELEVATION } from '../src/index.js';
 import type {
     CatenaryLayoutPreviewSource,
     CurveCreationPreviewSource,
@@ -159,11 +158,11 @@ export class RecordingLayerHost extends WorldRenderSystem {
     >();
     private _beds = new Map<
         string,
-        { container: Container; elevation: ELEVATION }
+        { container: Container; bandHeight: number }
     >();
     private _shadows = new Map<
         string,
-        { container: Container; elevation: ELEVATION }
+        { container: Container; bandHeight: number }
     >();
     private _drawables = new Map<string, Container>();
     private _overlays = new Set<Container>();
@@ -184,10 +183,10 @@ export class RecordingLayerHost extends WorldRenderSystem {
     override addBed(
         key: string,
         container: Container,
-        elevation: ELEVATION
+        bandHeight: number
     ): void {
-        super.addBed(key, container, elevation);
-        this._beds.set(key, { container, elevation });
+        super.addBed(key, container, bandHeight);
+        this._beds.set(key, { container, bandHeight });
     }
     override removeBed(key: string): void {
         this._beds.delete(key);
@@ -196,10 +195,10 @@ export class RecordingLayerHost extends WorldRenderSystem {
     override addShadow(
         key: string,
         container: Container,
-        elevation: ELEVATION
+        bandHeight: number
     ): void {
-        super.addShadow(key, container, elevation);
-        this._shadows.set(key, { container, elevation });
+        super.addShadow(key, container, bandHeight);
+        this._shadows.set(key, { container, bandHeight });
     }
     override removeShadow(key: string): void {
         this._shadows.delete(key);
@@ -234,14 +233,14 @@ export class RecordingLayerHost extends WorldRenderSystem {
     bandItem(key: string): Container | undefined {
         return this._bandItems.get(key)?.container;
     }
-    bedElevationOf(key: string): ELEVATION | undefined {
-        return this._beds.get(key)?.elevation;
+    bedElevationOf(key: string): number | undefined {
+        return this._beds.get(key)?.bandHeight;
     }
     bed(key: string): Container | undefined {
         return this._beds.get(key)?.container;
     }
-    shadowElevationOf(key: string): ELEVATION | undefined {
-        return this._shadows.get(key)?.elevation;
+    shadowElevationOf(key: string): number | undefined {
+        return this._shadows.get(key)?.bandHeight;
     }
     shadow(key: string): Container | undefined {
         return this._shadows.get(key)?.container;

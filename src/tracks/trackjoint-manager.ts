@@ -1,4 +1,5 @@
 import { GenericEntityManager } from '../shared/entity-manager.js';
+import { roundHeight } from './heights.js';
 import { SerializedTrackJoint, TrackJointWithElevation } from './types.js';
 
 export class TrackJointManager {
@@ -59,7 +60,7 @@ export class TrackJointManager {
 
     /**
      * Reconstructs a TrackJointManager from serialized data,
-     * preserving all original joint numbers.
+     * preserving all original joint numbers. Heights are rounded to 0.01 m.
      */
     static deserialize(data: SerializedTrackJoint[]): TrackJointManager {
         const maxId = data.reduce((max, j) => Math.max(max, j.jointNumber), -1);
@@ -73,7 +74,7 @@ export class TrackJointManager {
                     tangent: new Set(joint.direction.tangent),
                     reverseTangent: new Set(joint.direction.reverseTangent),
                 },
-                elevation: joint.elevation,
+                elevation: roundHeight(joint.elevation),
             });
         }
         return manager;

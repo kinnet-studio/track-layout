@@ -2,7 +2,6 @@ import type { Point } from '@ue-too/math';
 import { PointCal } from '@ue-too/math';
 import { Container, Graphics, MeshSimple, Texture } from 'pixi.js';
 
-import { LEVEL_HEIGHT } from '../index.js';
 import type { TrackGraph } from '../index.js';
 import type { StationManager } from '../index.js';
 import type { Platform } from '../index.js';
@@ -101,9 +100,9 @@ export class StationRenderSystem implements StationPlacementPreview {
         }
 
         const key = stationKey(id);
-        const elevationRaw = (station.elevation as number) * LEVEL_HEIGHT;
-        const bandIndex =
-            this._worldRenderSystem.getElevationBandIndex(elevationRaw);
+        const bandIndex = this._worldRenderSystem.getElevationBandIndex(
+            station.elevation
+        );
         // Place platform above track ballast in the drawable sublayer.
         this._worldRenderSystem.addToBand(
             key,

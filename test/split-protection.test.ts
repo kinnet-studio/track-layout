@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 const EAST = { x: 1, y: 0 };
 
@@ -79,11 +78,7 @@ describe('TrackGraph.insertJointIntoTrackSegment return value', () => {
     it('returns null for a sloped segment', () => {
         const graph = new TrackGraph();
         const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, EAST);
-        const b = graph.createNewEmptyJoint(
-            { x: 100, y: 0 },
-            EAST,
-            ELEVATION.ABOVE_1
-        );
+        const b = graph.createNewEmptyJoint({ x: 100, y: 0 }, EAST, 10);
         graph.connectJoints(a, b, [{ x: 50, y: 0 }]);
         expect(graph.insertJointIntoTrackSegment(a, b, 0.5)).toBeNull();
     });

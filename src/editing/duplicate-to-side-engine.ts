@@ -9,7 +9,7 @@ import type { Point } from '@ue-too/math';
 
 import { computeParallelSpacing } from '../index.js';
 import { TrackGraph } from '../index.js';
-import { ELEVATION, TrackSegmentWithElevation } from '../index.js';
+import { TrackSegmentWithElevation } from '../index.js';
 import { computeDuplicateGeometry } from './duplicate-geometry.js';
 import { DuplicateToSideContext } from './duplicate-to-side-state-machine.js';
 import type {
@@ -266,8 +266,8 @@ export class DuplicateToSideEngine implements DuplicateToSideContext {
         endPosition: Point;
         endTangent: Point;
         middleControlPoints: Point[];
-        startElevation: ELEVATION;
-        endElevation: ELEVATION;
+        startElevation: number;
+        endElevation: number;
     } | null {
         const segment = this._trackGraph.getTrackSegmentWithJoints(
             segmentNumber
