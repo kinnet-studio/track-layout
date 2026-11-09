@@ -886,44 +886,42 @@ describe('TrackRenderSystem: line styles', () => {
     });
 });
 
-describe('TrackRenderSystem: crossings and runs', () => {
-    const GAP = P + 0.5; // half-gap at 90°
-    const DECK = 1.067 / 2 + 1.5; // half-deck at 90°
-    const linesOf = (host: RecordingLayerHost, n: number) =>
-        strokedLines(host.bandItem(`__simplified__${n}`));
-    const xSpans = (lines: StrokedLine[]) =>
-        lines
-            .map(line => [
-                Math.min(...line.points.map(point => point.x)),
-                Math.max(...line.points.map(point => point.x)),
-            ])
-            .sort((a, b) => a[0]! - b[0]!);
-    /** h along y = 0, then v across it at x = 50, one level up. */
-    function crossing(graph: TrackGraph) {
-        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
-        return { h, v };
+const GAP = P + 0.5; // half-gap at 90°
+const DECK = 1.067 / 2 + 1.5; // half-deck at 90°
+const linesOf = (host: RecordingLayerHost, n: number) =>
+    strokedLines(host.bandItem(`__simplified__${n}`));
+const xSpans = (lines: StrokedLine[]) =>
+    lines
+        .map(line => [
+            Math.min(...line.points.map(point => point.x)),
+            Math.max(...line.points.map(point => point.x)),
+        ])
+        .sort((a, b) => a[0]! - b[0]!);
+/** h along y = 0, then v across it at x = 50, one level up. */
+function crossing(graph: TrackGraph) {
+    const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+    const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
+    return { h, v };
+}
+function expectBridge(host: RecordingLayerHost, h: number, v: number) {
+    const spans = xSpans(linesOf(host, h));
+    expect(spans).toHaveLength(2);
+    expect(spans[0]![1]).toBeCloseTo(50 - GAP, 6);
+    expect(spans[1]![0]).toBeCloseTo(50 + GAP, 6);
+    const parapets = linesOf(host, v).filter(
+        line => Math.abs(line.points[1]!.x - 50) > 1
+    );
+    const xs = parapets.map(line => line.points[1]!.x).sort((a, b) => a - b);
+    expect(xs).toHaveLength(2);
+    expect(xs[0]).toBeCloseTo(50 - P, 6);
+    expect(xs[1]).toBeCloseTo(50 + P, 6);
+    for (const parapet of parapets) {
+        expect(parapet.points[0]!.y).toBeCloseTo(-DECK - W, 6);
+        expect(parapet.points.at(-1)!.y).toBeCloseTo(DECK + W, 6);
     }
-    function expectBridge(host: RecordingLayerHost, h: number, v: number) {
-        const spans = xSpans(linesOf(host, h));
-        expect(spans).toHaveLength(2);
-        expect(spans[0]![1]).toBeCloseTo(50 - GAP, 6);
-        expect(spans[1]![0]).toBeCloseTo(50 + GAP, 6);
-        const parapets = linesOf(host, v).filter(
-            line => Math.abs(line.points[1]!.x - 50) > 1
-        );
-        const xs = parapets
-            .map(line => line.points[1]!.x)
-            .sort((a, b) => a - b);
-        expect(xs).toHaveLength(2);
-        expect(xs[0]).toBeCloseTo(50 - P, 6);
-        expect(xs[1]).toBeCloseTo(50 + P, 6);
-        for (const parapet of parapets) {
-            expect(parapet.points[0]!.y).toBeCloseTo(-DECK - W, 6);
-            expect(parapet.points.at(-1)!.y).toBeCloseTo(DECK + W, 6);
-        }
-    }
+}
 
+describe('TrackRenderSystem: crossings and runs', () => {
     it('draws a bridge where track crosses over other track', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
@@ -2287,3 +2285,88 @@ for (const style of ['centerline', 'rails'] as const) {
         });
     });
 }
+
+describe('TrackRenderSystem: joint height changes', () => {
+    /** Sets both joints of a segment to `metres`. */
+    function setHeight(graph: TrackGraph, segment: number, metres: number) {
+        const { t0Joint, t1Joint } =
+            graph.trackCurveManager.getTrackSegmentWithJoints(segment)!;
+        expect(graph.setJointElevation(t0Joint, metres)).toBeNull();
+        expect(graph.setJointElevation(t1Joint, metres)).toBeNull();
+    }
+
+    it('moves the zoomed-out line and the piece to the new band', () => {
+        const { host, graph } = scene();
+        const n = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        expect(host.bandOf('__simplified__0')).toBe(3);
+
+        setHeight(graph, n, 10);
+
+        expect(host.bandOf('__simplified__0')).toBe(4);
+        expect(host.bandOf(drawKey(0))).toBe(4);
+    });
+
+    it('keeps the zoomed-out line hidden while zoomed in', async () => {
+        const { host, graph, camera } = scene();
+        const n = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        await zoomTo(camera, 5);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(false);
+
+        setHeight(graph, n, 10);
+
+        expect(host.bandOf('__simplified__0')).toBe(4);
+        expect(host.bandItem('__simplified__0')!.visible).toBe(false);
+    });
+
+    it('adds and removes the underground indicator with the height', () => {
+        const { host, graph } = scene();
+        const n = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
+        expect(host.bandOf('__underground__0')).toBeUndefined();
+
+        setHeight(graph, n, -10);
+        expect(host.bandOf('__underground__0')).toBe(3);
+
+        setHeight(graph, n, 0);
+        expect(host.bandOf('__underground__0')).toBeUndefined();
+    });
+
+    it('draws and removes a bridge as the upper track comes down and up', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = crossing(graph);
+        expectBridge(host, h, v);
+
+        setHeight(graph, v, 0);
+        const spans = xSpans(linesOf(host, h));
+        expect(spans).toHaveLength(1);
+        expect(spans[0]![0]).toBeCloseTo(0, 6);
+        expect(spans[0]![1]).toBeCloseTo(100, 6);
+        expect(host.bandOf(`__simplified__${v}`)).toBe(3);
+
+        setHeight(graph, v, 10);
+        expectBridge(host, h, v);
+    });
+
+    it('swaps which track is cut when the lower one is raised over the other', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const { h, v } = crossing(graph);
+
+        setHeight(graph, h, 20);
+
+        // h is now the bridge: its centreline is whole, beside its parapets.
+        const hSpans = xSpans(linesOf(host, h));
+        expect(hSpans[0]![0]).toBeCloseTo(0, 6);
+        expect(hSpans[0]![1]).toBeCloseTo(100, 6);
+        expect(hSpans.filter(([from]) => from! < 40)).toHaveLength(1);
+        const ySpans = linesOf(host, v)
+            .map(line => [
+                Math.min(...line.points.map(point => point.y)),
+                Math.max(...line.points.map(point => point.y)),
+            ])
+            .sort((a, b) => a[0]! - b[0]!);
+        expect(ySpans).toHaveLength(2);
+        expect(ySpans[0]![1]).toBeCloseTo(-GAP, 6);
+        expect(ySpans[1]![0]).toBeCloseTo(GAP, 6);
+    });
+});

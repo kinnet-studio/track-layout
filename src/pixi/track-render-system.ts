@@ -571,6 +571,10 @@ export class TrackRenderSystem {
             this._onSegmentStyleChanged.bind(this),
             { signal: this._abortController.signal }
         );
+        this._trackCurveManager.onSegmentElevationChanged(
+            this._onSegmentElevationChanged.bind(this),
+            { signal: this._abortController.signal }
+        );
 
         this._camera = camera;
         this._textureRenderer = options.textureRenderer ?? null;
@@ -628,6 +632,25 @@ export class TrackRenderSystem {
             elevationMesh.visible = this._showElevationGradient;
             solidBallastMesh.visible = !this._showElevationGradient;
         }
+    }
+
+    /**
+     * Redraws what a segment's height change leaves stale. The draw-data
+     * events have already rebuilt its detailed pieces; what is left is what
+     * `_onAddTrackSegment` draws once: the zoomed-out line, the underground
+     * indicator and the line-style drawing, with the crossing marks of the
+     * segments it crosses and is near. Removing and adding the segment
+     * redraws all of them. The model still holds the segment, so the
+     * neighbour redraws on removal see its new heights; the add redraws them
+     * again. New graphics start visible, so the zoom level is applied again.
+     */
+    private _onSegmentElevationChanged(segmentNumber: number): void {
+        const segment =
+            this._trackCurveManager.getTrackSegmentWithJoints(segmentNumber);
+        if (segment === null) return;
+        this._onRemoveTrackSegment(segmentNumber);
+        this._onAddTrackSegment(segmentNumber, segment);
+        this._applyZoomLod(this._camera.zoomLevel);
     }
 
     /**
