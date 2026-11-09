@@ -49,8 +49,11 @@ third argument, and the example above lays flat track at 0 m.
     ```ts
     import { levelsToMetres } from 'track-layout';
 
-    const { track, stations } = levelsToMetres({ track: old.track, stations });
-    await graph.loadFromSerializedData(track);
+    const migrated = levelsToMetres({
+        track: old.track,
+        stations: old.stations,
+    });
+    await graph.loadFromSerializedData(migrated.track);
     ```
 
 - **Changing a laid joint's height.** `graph.setJointElevation(joint, metres)`
