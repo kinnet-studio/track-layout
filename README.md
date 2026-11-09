@@ -32,6 +32,51 @@ graph.connectJoints(a, b, [{ x: 50, y: 0 }], 1.067);
 const saved = JSON.stringify(graph.serialize());
 ```
 
+## Heights
+
+Heights are free values in metres, not levels. A joint, a segment end and a
+station each hold one. `createNewEmptyJoint` takes the joint's height as its
+third argument, and the example above lays flat track at 0 m.
+
+- **Range and rounding.** Heights run from `HEIGHT_MIN` (-200 m) to
+  `HEIGHT_MAX` (200 m) and are rounded to 0.01 m. The model rounds the
+  heights it is given when it lays, splits, saves and loads; `roundHeight`,
+  `clampHeight` and `isValidHeight` are exported for your own code.
+- **Migrating level saves.** Older saves held heights as whole levels of
+  10 m, from -3 to +3. `levelsToMetres` converts a save's track and
+  stations before you load them. It returns new objects.
+
+    ```ts
+    import { levelsToMetres } from 'track-layout';
+
+    const { track, stations } = levelsToMetres({ track: old.track, stations });
+    await graph.loadFromSerializedData(track);
+    ```
+
+- **Changing a laid joint's height.** `graph.setJointElevation(joint, metres)`
+  moves the joint, rounded to 0.01 m, and the end of each segment that meets
+  it. Each segment is rebuilt in place and keeps its segment number, curve,
+  gauge, style and offsets, so anything that refers to it by number, such as
+  a platform, stays valid. It is split again at the crossings its new
+  heights make. It returns `null`, or says why nothing changed:
+  `'unknownJoint'`, `'outOfRange'` (outside `HEIGHT_MIN` to `HEIGHT_MAX`) or
+  `'protectedSegment'` (a segment at the joint is protected by the check set
+  with `setSegmentProtectionCheck`, such as one with a platform). It doesn't
+  check the laying rules, so it can leave a junction with a sloped branch.
+  A height the joint already has changes nothing.
+- **Reacting to it.** `graph.onSegmentElevationChanged(segmentNumber => ...)`
+  fires for each rebuilt segment. The segment's pieces are deleted and added
+  again through the usual draw-data events, with no segment add or remove
+  event. `TrackRenderSystem` listens: after a height change it redraws the
+  segment's pieces, its zoomed-out line and its underground mark, and, in
+  `'centerline'` and `'rails'`, the crossings the segment takes part in.
+
+```ts
+const refused = graph.setJointElevation(joint, 7.5);
+if (refused !== null) showWarning(refused);
+graph.onSegmentElevationChanged(n => console.log('redraw', n));
+```
+
 ## Laying and editing track
 
 `track-layout/editing` holds the laying engine and the editing tools as
@@ -68,6 +113,20 @@ reason, and is null once a curve is laid.
 engine.onCurveRefused(refusal => showWarning(refusal));
 ```
 
+The engine's bump and lower methods (such as `bumpEndJointElevation`) step
+a joint's height by `engine.elevationStep`, 1 m by default.
+`engine.setElevationStep(metres)` changes it, rounded to 0.01 m, and throws
+a `RangeError` below 0.01 m. Steps land on multiples of the step, so from
+3.5 m a 1 m step goes to 4 m. Heights stay within `HEIGHT_MIN` to
+`HEIGHT_MAX`. `engine.previewGradient` gives the preview curve's rise over
+its length as a percentage (rising is positive), or `null` with no preview
+or a preview shorter than 0.01 m.
+
+```ts
+engine.setElevationStep(0.5);
+const gradient = engine.previewGradient; // e.g. 2.5 for a 2.5% climb
+```
+
 ## Placing stations
 
 `track-layout/station-placement` holds the station placement tools as
@@ -89,7 +148,6 @@ platform pairs. Like the editing tools, they need `@ue-too/being`.
 
 ```ts
 import {
-    ELEVATION,
     StationManager,
     TrackAlignedPlatformManager,
     TrackGraph,
@@ -125,7 +183,7 @@ const tool = createSingleSpinePlacementStateMachine(engine);
 const stationId = stations.createStation({
     name: 'Central',
     position: { x: 50, y: 10 },
-    elevation: ELEVATION.GROUND,
+    elevation: 0, // metres
     platforms: [],
     trackSegments: [],
     joints: [],
@@ -143,10 +201,18 @@ track-aligned platforms and joint-direction indicators. It needs the
 optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
 
 - **Layer host.** The renderers draw into a `LayerHost`, which orders
-  content by elevation band. `WorldRenderSystem` is the default one: add
+  content by height band. `WorldRenderSystem` is the default one: add
   its `container` to your stage under the camera transform. Draw your own
-  elevation-ordered content (trains, buildings) into the same host so it
+  height-ordered content (trains, buildings) into the same host so it
   interleaves with track.
+    - **Bands.** The default host has seven bands, at the heights in
+      `DETAILED_BAND_HEIGHTS`: -30, -20, -10, 0, 10, 20 and 30 m. A height
+      between two bands goes in the upper one, and a height beyond the
+      lowest or highest band is clamped to it, so everything below -30 m
+      shares the lowest band and everything above 30 m the highest. Band
+      order sets draw order only; the heights themselves are not capped at
+      30 m. `host.getElevationBandIndex(metres)` gives the band for a
+      height.
 - **Track.** `TrackRenderSystem` draws the track the graph already holds
   when it is built, then track as the graph adds and removes it. Its
   options are all optional:
@@ -179,7 +245,7 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       lighter, broken lines with a portal where it reaches the surface. A
       deck or gap near a joint carries on across it, onto every segment
       there (all the branches at a junction). Tracks side by side over the
-      same track, at the same level and with no more than 2 m between
+      same track, at the same height and with no more than 2 m between
       their parapets, share one bridge: only the outer parapets are drawn,
       and the gap beneath runs unbroken. Highlights and snap dots are drawn
       as in `'detailed'`.
