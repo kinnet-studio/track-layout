@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { BufferGeometry, type Group, type Mesh } from 'three';
 
 import { TrackScene } from '../src/three/track-scene.js';
@@ -62,11 +62,20 @@ function geometriesOf(ts: TrackScene) {
 
 let graph: TrackGraph;
 let spy: ReturnType<typeof spyOnGeometryDispose> | undefined;
+let consoleSpies: Array<ReturnType<typeof spyOn>> = [];
 
 beforeEach(() => {
+    // TrackGraph logs every connectJoints and EntityManager reports growth;
+    // keep the test output clean.
+    consoleSpies = [
+        spyOn(console, 'log').mockImplementation(() => {}),
+        spyOn(console, 'info').mockImplementation(() => {}),
+    ];
     graph = new TrackGraph();
 });
 afterEach(() => {
+    for (const s of consoleSpies) s.mockRestore();
+    consoleSpies = [];
     spy?.restore();
     spy = undefined;
 });
@@ -288,7 +297,6 @@ describe('TrackScene', () => {
     });
 
     it('builds a scene of 3000 segments in under 3 s', () => {
-        const t0 = performance.now();
         for (let i = 0; i < 3000; i++) {
             const col = i % 60;
             const row = Math.floor(i / 60);
@@ -298,14 +306,10 @@ describe('TrackScene', () => {
                 { x: col * 30 + 10, y: row * 30 }
             );
         }
-        const graphMs = performance.now() - t0;
         expect(graph.trackCurveManager.livingEntities).toHaveLength(3000);
         const t1 = performance.now();
         const ts = new TrackScene(graph);
         const ms = performance.now() - t1;
-        console.log(
-            `graph ${graphMs.toFixed(0)} ms, scene ${ms.toFixed(0)} ms`
-        );
         expect(segmentGroups(ts)).toHaveLength(3000);
         expect(ms).toBeLessThan(3000);
         ts.dispose();
