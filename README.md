@@ -16,10 +16,12 @@ bun add track-layout @ue-too/board @ue-too/curve @ue-too/math
 ```
 
 For the 3D view in `track-layout/three`, also add the optional peer `three`
-(`^0.186.1`):
+(`^0.186.1`). TypeScript users also add `@types/three@0.186.0`, because the
+published type declarations import three's types:
 
 ```bash
-bun add three
+bun add three@^0.186.1
+bun add -d @types/three@0.186.0 # TypeScript only
 ```
 
 ## Example
@@ -396,16 +398,16 @@ optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
     - `dispose()` stops listening and frees the geometry and materials.
 - **`TrackView3D`.** `new TrackView3D(canvas, trackScene, options)` draws a
   `TrackScene` on a canvas, on demand: only after the scene, the camera or
-  the size changes. It adds its lights to the scene and takes them out on
-  `dispose()`; the scene stays yours to dispose.
+  the size changes. It adds its lights and the orbit ground to the scene and
+  takes them out on `dispose()`; the scene stays yours to dispose.
     - **Straight down.** An orthographic camera. `setTopDown(view)` takes
       a `BoardView`, the board camera's `position`, `zoomLevel`,
       `rotation`, `viewPortWidth` and `viewPortHeight`. A world point lands
       on the same viewport pixel as in Pixi.
     - **Orbit.** `enterOrbit()` switches to a perspective camera (45° field
       of view) over the straight-down view's centre, tilted 45° at the same
-      heading; `leaveOrbit()` comes back to the newest `setTopDown` view.
-      Left drag or one finger rotates, right drag, Shift+drag or two
+      heading, and throws if `setTopDown` hasn't been called yet;
+      `leaveOrbit()` comes back to the newest `setTopDown` view. Left drag or one finger rotates, right drag, Shift+drag or two
       fingers pan, and the wheel or a pinch zooms. The camera stays at most
       85° from straight down. A see-through ground plane with a 100 m grid
       lies at 0 m around the layout while orbiting.
@@ -415,7 +417,9 @@ optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
       both canvases change in the same frame. It returns whether it
       rendered.
     - **Size.** `resize(widthCss, heightCss, pixelRatio)` sizes the drawing
-      buffer; the canvas's CSS size is yours.
+      buffer; the canvas's CSS size is yours. Call it before the first
+      render: until then the view takes its size from the canvas's
+      drawing-buffer pixels, not its CSS size.
     - **Failure.** `TrackView3D.isSupported()` says whether the browser can
       give a canvas a WebGL 2 context, and the constructor throws
       `WebGLUnavailableError` when it can't. `onContextLost(listener)`
@@ -451,9 +455,9 @@ await app.init({ backgroundAlpha: 0 }); // a see-through Pixi canvas
 const camera = new DefaultBoardCamera();
 const graph = new TrackGraph();
 const canvas = document.createElement('canvas'); // put it under app.canvas
-const view = new TrackView3D(canvas, new TrackScene(graph), {
-    autoRender: false,
-});
+const scene = new TrackScene(graph);
+const view = new TrackView3D(canvas, scene, { autoRender: false });
+// Size the view before its first render.
 view.resize(camera.viewPortWidth, camera.viewPortHeight, devicePixelRatio);
 
 const host = new WorldRenderSystem();
@@ -461,10 +465,18 @@ app.stage.addChild(host.container); // apply the camera's transform to it
 const track = new TrackRenderSystem(host, graph.trackCurveManager, camera);
 track.drawLaidTrack = false; // the 3D canvas draws the laid track
 
-app.ticker.add(() => {
-    view.setTopDown(camera); // the board camera has a BoardView's fields
+const draw3D = () => {
+    // The board camera is a BoardView. An unchanged view requests no render,
+    // so this renders only after the camera or the scene changes.
+    view.setTopDown(camera);
     view.renderIfNeeded();
-});
+};
+app.ticker.add(draw3D);
+
+// When you're done with the 3D view:
+app.ticker.remove(draw3D);
+view.dispose();
+scene.dispose();
 ```
 
 ## Development

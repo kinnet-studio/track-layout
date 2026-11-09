@@ -33,10 +33,11 @@ export class WebGLUnavailableError extends Error {
 
 /**
  * The board zoom (px per metre) from which the straight-down view shows the
- * rails and catenary. It is 2D's `ZOOM_THRESHOLD_DETAILED_TRACK` in
- * src/pixi/track-render-system.ts, which src/three can't import; keep the two
- * equal (test/three-orbit.test.ts checks).
+ * rails and catenary, the same zoom from which 2D's Detailed style draws them.
  */
+// It is ZOOM_THRESHOLD_DETAILED_TRACK in src/pixi/track-render-system.ts,
+// which src/three can't import; keep the two equal (test/three-orbit.test.ts
+// checks).
 export const DETAILED_TRACK_ZOOM = 5;
 
 /** The 2D sun angle's default, as `TrackRenderSystem`'s `_sunAngle`. */
@@ -96,6 +97,10 @@ export type TrackView3DOptions = {
  *
  * The view adds its lights and the ground to the scene, and takes them out on
  * `dispose`. The scene itself stays the caller's to dispose.
+ *
+ * Call `resize` before the first render. Until then the view takes its size
+ * from the canvas's drawing-buffer pixels (300 × 150 for a new canvas), not
+ * its CSS size.
  */
 export class TrackView3D {
     private readonly _renderer: WebGLRenderer;
@@ -228,6 +233,8 @@ export class TrackView3D {
      *
      * Left drag or one finger turns it; right drag, Shift+left drag or two
      * fingers pan; the wheel or a pinch zooms.
+     *
+     * @throws Error if `setTopDown` hasn't been called.
      */
     enterOrbit(): void {
         if (this._disposed || this.orbiting) return;

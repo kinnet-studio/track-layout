@@ -39,8 +39,8 @@ export function worldToScene(point: Point, height: number): Vector3 {
  *
  * Rotation sign: the board camera turns the world by `-rotation` on screen
  * (y down), so the screen's up direction in the scene is `(sin r, cos r, 0)`.
- * The rotated test case in test/three-camera.test.ts is the authority.
  */
+// The rotated case in test/three-camera.test.ts is the authority on the sign.
 export function applyTopDownCamera(
     camera: OrthographicCamera,
     view: BoardView
