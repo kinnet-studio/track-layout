@@ -31,7 +31,7 @@ export type TunnelEntranceGeometry = {
 export function computeTunnelEntranceGeometry(
     drawData: TrackSegmentDrawData,
     terrainData: TerrainSampler | null,
-    getElevationBandIndex: (rawElevation: number) => number
+    getElevationBandIndex: (height: number) => number
 ): TunnelEntranceGeometry | null {
     const { curve, elevation } = drawData;
     // Only draw on ramped tracks (not flat underground tracks).

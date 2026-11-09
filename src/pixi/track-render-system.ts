@@ -1853,8 +1853,7 @@ export class TrackRenderSystem {
         return computeTunnelEntranceGeometry(
             drawData,
             this._terrainData ?? null,
-            rawElevation =>
-                this._worldRenderSystem.getElevationBandIndex(rawElevation)
+            height => this._worldRenderSystem.getElevationBandIndex(height)
         );
     }
 
@@ -1862,7 +1861,7 @@ export class TrackRenderSystem {
      * Build the retaining-wall meshes (two thin parallel strips) for a
      * ramped track that goes below terrain.
      *
-     * Placed in the GROUND band's drawable sublayer.
+     * Placed in the drawable sublayer of the band at the terrain surface.
      */
     private _buildCuttingForDrawData(
         drawData: TrackSegmentDrawData
@@ -1904,7 +1903,8 @@ export class TrackRenderSystem {
      * terrain. The cover spans the full width between the outer wall edges at
      * the underground end of the ramp.
      *
-     * Placed in the GROUND band's onTrack sublayer so it renders above rails.
+     * Placed in the onTrack sublayer of the band at the terrain surface so it
+     * renders above rails.
      */
     private _buildCuttingCoverForDrawData(
         drawData: TrackSegmentDrawData
@@ -1965,10 +1965,9 @@ export class TrackRenderSystem {
         if (elevation.from >= startTerrainH || elevation.to >= endTerrainH)
             return null;
 
-        const rawElevation = Math.max(elevation.from, elevation.to);
+        const height = Math.max(elevation.from, elevation.to);
         return {
-            bandIndex:
-                this._worldRenderSystem.getElevationBandIndex(rawElevation),
+            bandIndex: this._worldRenderSystem.getElevationBandIndex(height),
         };
     }
 
@@ -2874,8 +2873,10 @@ export class TrackRenderSystem {
      * then redraws what it was crossing, which loses its deck or gap, the
      * `tunnel` and `bridge` segments at its ends, whose run ends may change,
      * and the segments in reach of it and of what it crossed, which lose what
-     * carried across. The model no longer has the segment, so only what was
-     * recorded about it is used.
+     * carried across. When the segment was removed the model no longer has
+     * it, so only what was recorded about it is used. On a height change
+     * (`_onSegmentElevationChanged`) the model still has it, and the add path
+     * that follows redraws everything again.
      */
     private _forgetLineSegment(curveNumber: number): void {
         const record = this._lineTracks.get(curveNumber);
@@ -2937,12 +2938,11 @@ export class TrackRenderSystem {
 
         const simplifiedTrackGraphics = buildBezierLine(trackSegment.curve);
 
-        const rawElevation = Math.max(
+        const height = Math.max(
             trackSegment.elevation.from,
             trackSegment.elevation.to
         );
-        const bandIndex =
-            this._worldRenderSystem.getElevationBandIndex(rawElevation);
+        const bandIndex = this._worldRenderSystem.getElevationBandIndex(height);
         const bandKey = `__simplified__${curveNumber}`;
         this._worldRenderSystem.addToBand(
             bandKey,
@@ -3163,12 +3163,12 @@ export class TrackRenderSystem {
             this._drawableKeys.add(key);
 
             // Determine band index for this segment.
-            const rawElevation = Math.max(
+            const height = Math.max(
                 drawData.elevation.from,
                 drawData.elevation.to
             );
             const bandIndex =
-                this._worldRenderSystem.getElevationBandIndex(rawElevation);
+                this._worldRenderSystem.getElevationBandIndex(height);
 
             this._worldRenderSystem.addToBand(
                 key,
@@ -3278,12 +3278,12 @@ export class TrackRenderSystem {
         >();
 
         drawDataOrder.forEach(drawData => {
-            const rawElevation = Math.max(
+            const height = Math.max(
                 drawData.elevation.from,
                 drawData.elevation.to
             );
             const bandIndex =
-                this._worldRenderSystem.getElevationBandIndex(rawElevation);
+                this._worldRenderSystem.getElevationBandIndex(height);
             const key = JSON.stringify({
                 trackSegmentNumber:
                     drawData.originalTrackSegment.trackSegmentNumber,

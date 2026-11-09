@@ -84,7 +84,7 @@ const SUBLAYER_MAP: Record<BandSublayer, number> = {
 };
 
 /**
- * An elevation band groups all render layers for a single elevation level.
+ * A height band groups all render layers for a single band height.
  *
  * Each sublayer is a separate Container with its own z-index space,
  * so there is no hard cap on the number of items per sublayer.
@@ -382,7 +382,7 @@ export class WorldRenderSystem implements LayerHost {
     // -------------------------------------------------------------------------
 
     /**
-     * Add shadow graphics to the shadow container at the given elevation level.
+     * Add shadow graphics to the shadow container in the band at the given height.
      *
      * For tracks: use the track's top elevation (shadow falls just below the track).
      * For buildings: use one level above the base elevation (shadow falls on

@@ -39,9 +39,11 @@ describe('heights in the model', () => {
     });
 
     it('holds split pieces in metres, not metres x 10', () => {
-        // A ramp from 0 to 30 m crossing a flat 16 m bridge, less than the 3 m clearance above the ramp's 15 m midpoint.
+        // A flat 20 m track is laid first. The ramp from 0 to 30 m is laid
+        // across it, crossing at t = 0.5, and is split at t = 0.25 by
+        // createCurveWithJoints' midpoint rule.
         const graph = new TrackGraph();
-        layLine(graph, { x: 100, y: -100 }, { x: 100, y: 100 }, 16);
+        layLine(graph, { x: 100, y: -100 }, { x: 100, y: 100 }, 20);
         const start = graph.createNewEmptyJoint(
             { x: 0, y: 0 },
             { x: 1, y: 0 },
@@ -58,11 +60,10 @@ describe('heights in the model', () => {
         const pieces = graph.trackCurveManager.persistedDrawData.filter(
             d => d.originalTrackSegment.trackSegmentNumber === ramp
         );
-        expect(pieces.length).toBeGreaterThan(1);
-        for (const p of pieces) {
-            expect(p.elevation.from).toBeGreaterThanOrEqual(0);
-            expect(p.elevation.to).toBeLessThanOrEqual(30);
-        }
+        expect(pieces.map(p => [p.elevation.from, p.elevation.to])).toEqual([
+            [0, 7.5],
+            [7.5, 30],
+        ]);
     });
 
     it('rounds heights on load', async () => {

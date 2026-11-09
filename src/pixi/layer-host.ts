@@ -4,7 +4,7 @@ import type { BandSublayer } from './world-render-system.js';
 
 /**
  * Where the renderers put what they draw. Content is grouped into one band
- * per elevation level, and each band has sublayers that fix the draw order
+ * per height band, and each band has sublayers that fix the draw order
  * within it.
  *
  * `WorldRenderSystem` is the default implementation. An app whose own

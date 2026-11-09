@@ -2369,4 +2369,33 @@ describe('TrackRenderSystem: joint height changes', () => {
         expect(ySpans[0]![1]).toBeCloseTo(-GAP, 6);
         expect(ySpans[1]![0]).toBeCloseTo(GAP, 6);
     });
+
+    it('keeps cutting a track under two joined segments when their shared joint is raised', () => {
+        const { host, graph, renderer } = scene();
+        renderer.renderStyle = 'centerline';
+        const {
+            joints: [, shared],
+            segments: [first, second],
+        } = layTrack(graph, [A, B, C], 10);
+        const under = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 0);
+        const cutOf = () =>
+            linesOf(host, under)
+                .map(line => [
+                    Math.min(...line.points.map(point => point.y)),
+                    Math.max(...line.points.map(point => point.y)),
+                ])
+                .sort((a, b) => a[0]! - b[0]!);
+        expect(cutOf()).toHaveLength(2);
+
+        expect(graph.setJointElevation(shared!, 20)).toBeNull();
+
+        // The track below is still cut where the first segment crosses it.
+        const ySpans = cutOf();
+        expect(ySpans).toHaveLength(2);
+        expect(ySpans[0]![1]).toBeCloseTo(-GAP, 6);
+        expect(ySpans[1]![0]).toBeCloseTo(GAP, 6);
+        // Both joined segments are in the band of their higher end, 20 m.
+        expect(host.bandOf(`__simplified__${first}`)).toBe(5);
+        expect(host.bandOf(`__simplified__${second}`)).toBe(5);
+    });
 });

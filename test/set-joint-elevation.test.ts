@@ -276,6 +276,7 @@ describe('TrackCurveManager.setSegmentElevation', () => {
         expect(after.collision).toBe(collision);
         expect(after.trackStyle).toBe('slab');
         expect(after.electrified).toBe(true);
+        expect(manager.trackOffsets).toHaveLength(offsets.length);
         expect(manager.trackOffsets.every((o, i) => o === offsets[i])).toBe(
             true
         );

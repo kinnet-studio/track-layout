@@ -250,8 +250,10 @@ export class TrackCurveManager {
      * and one add event for the new ones, then onSegmentElevationChanged; no
      * segment add or remove event. Returns false for an unknown segment.
      *
-     * Use TrackGraph.setJointElevation, which also moves the joint and the
-     * other segments that meet it.
+     * Use TrackGraph.setJointElevation instead: it keeps the joint's height
+     * in step with its segments and marks TrackGraph's draw cache dirty.
+     * Calling this directly leaves TrackGraph.getDrawData returning the old
+     * pieces.
      */
     setSegmentElevation(
         segmentNumber: number,
@@ -284,7 +286,9 @@ export class TrackCurveManager {
         // The R-tree entry is a copy of the segment with its old heights and
         // pieces, so it is replaced.
         const treeEntry = this._treeEntryFor(segmentNumber, curve);
-        if (treeEntry !== undefined) {
+        if (treeEntry === undefined) {
+            console.warn('track segment tree entry not found');
+        } else {
             this._internalRTree.removeByData(treeEntry);
         }
         const aabb = curve.AABB;

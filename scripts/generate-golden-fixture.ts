@@ -5,12 +5,10 @@
  * track-layout changes. The golden-scene test loads it and saves it again to
  * prove old banana saves keep loading.
  *
- * Run once, right after the verbatim port, and commit the output. Re-running
- * it after the model changes would produce a different file.
- *
- * Heights below are levels, as the old model saved them. The model now reads
- * heights as metres, so re-running this script no longer reproduces the
- * fixture; keep it as a record of how the fixture was made.
+ * Run once, right after the verbatim port, and commit the output. The fixture
+ * is a record of an old save, made from the literal levels below, and is not
+ * regenerated: the model now reads heights as metres, so the old values it
+ * holds are exactly what the migration path must keep loading.
  *
  * Usage: bun scripts/generate-golden-fixture.ts
  */

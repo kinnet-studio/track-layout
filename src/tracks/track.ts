@@ -1058,7 +1058,7 @@ export class TrackGraph {
 
     /**
      * Get track segments sorted by elevation for proper drawing order.
-     * SUB_3 elevation segments are drawn first, highest elevation segments are drawn last.
+     * The lowest segments are drawn first, the highest last.
      * For segments with different start/end elevations, uses the minimum elevation for sorting.
      * @returns Track segments sorted by elevation (ascending order)
      */
@@ -1076,7 +1076,7 @@ export class TrackGraph {
 
     /**
      * Get track segments sorted by elevation for proper drawing order.
-     * SUB_3 elevation segments are drawn first, highest elevation segments are drawn last.
+     * The lowest segments are drawn first, the highest last.
      * For segments with different start/end elevations, uses the maximum elevation for sorting.
      * @returns Track segments sorted by elevation (ascending order)
      */
@@ -1094,7 +1094,7 @@ export class TrackGraph {
 
     /**
      * Get track segments sorted by elevation for proper drawing order.
-     * SUB_3 elevation segments are drawn first, highest elevation segments are drawn last.
+     * The lowest segments are drawn first, the highest last.
      * For segments with different start/end elevations, uses the average elevation for sorting.
      * @returns Track segments sorted by elevation (ascending order)
      */
