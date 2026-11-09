@@ -176,11 +176,34 @@ export class TrackView3D {
     }
 
     /**
-     * Follow the board camera. While orbiting, the view is only recorded
-     * (Ruling R7): `leaveOrbit` comes back to the newest one.
+     * Follow the board camera. `view` can be the board camera itself: its
+     * fields are copied, and the object isn't kept. A view equal to the last
+     * one changes nothing, so calling this every frame renders only after
+     * the view changes. While orbiting, the view is only recorded:
+     * `leaveOrbit` comes back to the newest one.
      */
     setTopDown(view: BoardView): void {
-        this._view = { ...view, position: { ...view.position } };
+        const last = this._view;
+        if (
+            last !== null &&
+            last.position.x === view.position.x &&
+            last.position.y === view.position.y &&
+            last.zoomLevel === view.zoomLevel &&
+            last.rotation === view.rotation &&
+            last.viewPortWidth === view.viewPortWidth &&
+            last.viewPortHeight === view.viewPortHeight
+        ) {
+            return;
+        }
+        // Field by field: a board camera's fields are getters, which a
+        // spread would drop.
+        this._view = {
+            position: { x: view.position.x, y: view.position.y },
+            zoomLevel: view.zoomLevel,
+            rotation: view.rotation,
+            viewPortWidth: view.viewPortWidth,
+            viewPortHeight: view.viewPortHeight,
+        };
         applyTopDownCamera(this._topDownCamera, this._view);
         if (!this.orbiting) this.requestRender();
     }
