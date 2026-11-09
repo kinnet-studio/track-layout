@@ -1,6 +1,6 @@
 import { BCurve } from '@ue-too/curve';
 import { type Point, PointCal } from '@ue-too/math';
-import { describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { type Container, type Graphics, Texture } from 'pixi.js';
 
 import {
@@ -2397,5 +2397,349 @@ describe('TrackRenderSystem: joint height changes', () => {
         // Both joined segments are in the band of their higher end, 20 m.
         expect(host.bandOf(`__simplified__${first}`)).toBe(5);
         expect(host.bandOf(`__simplified__${second}`)).toBe(5);
+    });
+});
+
+describe('TrackRenderSystem: drawLaidTrack', () => {
+    // The graph logs as it lays track; keep these tests quiet.
+    let quiet: ReturnType<typeof spyOn> | undefined;
+    beforeEach(() => {
+        quiet = spyOn(console, 'log').mockImplementation(() => {});
+    });
+    afterEach(() => {
+        quiet?.mockRestore();
+    });
+
+    /** Whether `key` is one the renderer gives to a piece of the preview. */
+    const isPreview = (key: string) => key.startsWith('__preview');
+
+    /**
+     * The pieces the renderer gave the host, named by their key (beds,
+     * shadows and unbanded drawables by kind and key): those of the preview,
+     * or those of laid track. Laid track puts nothing in the overlays, which
+     * hold the highlights and the projection dots.
+     */
+    function pieces(
+        host: RecordingLayerHost,
+        preview = false
+    ): [string, Container][] {
+        const ours = (key: string) => isPreview(key) === preview;
+        return [
+            ...host.bandKeys
+                .filter(ours)
+                .map((key): [string, Container] => [key, host.bandItem(key)!]),
+            ...host.bedKeys
+                .filter(ours)
+                .map((key): [string, Container] => [
+                    `bed ${key}`,
+                    host.bed(key)!,
+                ]),
+            ...host.shadowKeys
+                .filter(ours)
+                .map((key): [string, Container] => [
+                    `shadow ${key}`,
+                    host.shadow(key)!,
+                ]),
+            ...host.drawableKeys
+                .filter(ours)
+                .map((key): [string, Container] => [
+                    `drawable ${key}`,
+                    host.getDrawable(key)!,
+                ]),
+        ];
+    }
+
+    /** The names of the pieces of laid track that are shown. */
+    const shownLaid = (host: RecordingLayerHost) =>
+        pieces(host)
+            .filter(([, piece]) => piece.visible)
+            .map(([name]) => name);
+
+    /** Whether a piece of laid track is drawn zoomed out, rather than zoomed in. */
+    const zoomedOut = (name: string) =>
+        name.startsWith('__simplified__') || name.startsWith('__underground__');
+
+    /**
+     * Expects laid track shown as the zoom level alone has it in `detailed`:
+     * the zoomed-out pieces below zoom 5, and the rest from 5.
+     */
+    function expectShownByZoom(host: RecordingLayerHost, zoomedIn: boolean) {
+        expect(shownLaid(host)).toEqual(
+            pieces(host)
+                .map(([name]) => name)
+                .filter(name => zoomedOut(name) !== zoomedIn)
+        );
+    }
+
+    /**
+     * Lays track with every kind of piece, over terrain at 5 m: a ramp from
+     * 0 to 10 m along A to B (a cutting and its cover), a segment at 10 m
+     * (a shadow) and one at -10 m (tunnel walls and a ceiling, and the
+     * dashed underground line), all bedded and electrified.
+     */
+    function layEverything(graph: TrackGraph) {
+        graph.setNewSegmentStyle({ bed: true, electrified: true });
+        layRamp(graph, 0, 10);
+        layTrack(
+            graph,
+            [
+                { x: 0, y: 50 },
+                { x: 100, y: 50 },
+            ],
+            10
+        );
+        layTrack(
+            graph,
+            [
+                { x: 0, y: -50 },
+                { x: 100, y: -50 },
+            ],
+            -10
+        );
+    }
+
+    it('starts true, and hides every piece of laid track at every zoom level while false', async () => {
+        const { host, graph, camera, renderer } = scene({
+            terrain: flatTerrain(5),
+        });
+        layEverything(graph);
+        await zoomTo(camera, 10);
+        const names = pieces(host).map(([name]) => name);
+        for (const kind of [
+            '__rail__',
+            '__catenary__',
+            '__cutting__',
+            '__cutting_cover__',
+            '__tunnel_wall__',
+            '__tunnel_ceiling__',
+            '__simplified__',
+            '__underground__',
+            'bed ',
+            'shadow ',
+        ]) {
+            expect(names.some(name => name.startsWith(kind))).toBe(true);
+        }
+        expect(names).toContain(KEY);
+        expect(renderer.drawLaidTrack).toBe(true);
+        expectShownByZoom(host, true);
+
+        renderer.drawLaidTrack = false;
+
+        expect(renderer.drawLaidTrack).toBe(false);
+        expect(shownLaid(host)).toEqual([]);
+        await zoomTo(camera, 1);
+        expect(shownLaid(host)).toEqual([]);
+
+        renderer.drawLaidTrack = true;
+
+        expectShownByZoom(host, false);
+        await zoomTo(camera, 10);
+        expectShownByZoom(host, true);
+    });
+
+    it('hides laid track but keeps the preview, highlights and projection dots while false', async () => {
+        const curveCreation = fakeCurveCreationSource();
+        const catenaryLayout = fakeCatenaryLayoutSource();
+        const { host, graph, camera, renderer } = scene({
+            curveCreation: curveCreation.source,
+            catenaryLayout: catenaryLayout.source,
+            terrain: flatTerrain(5),
+        });
+        layEverything(graph);
+        await zoomTo(camera, 10);
+        // Under the terrain, with a bed: a tunnel and a bed in the preview.
+        curveCreation.emit(
+            'onPreviewDrawDataChange',
+            previewData(
+                graph,
+                new BCurve([
+                    { x: 0, y: 100 },
+                    { x: 50, y: 100 },
+                    { x: 100, y: 100 },
+                ])
+            )
+        );
+        const previewPieces = () => pieces(host, true);
+        const previewNames = previewPieces().map(([name]) => name);
+        expect(previewNames).toContain('__preview__0');
+        expect(previewNames).toContain('bed __preview_bed__0');
+        expect(previewNames).toContain('__preview_tunnel_wall__0');
+
+        renderer.drawLaidTrack = false;
+
+        expect(shownLaid(host)).toEqual([]);
+        expect(previewPieces().filter(([, piece]) => !piece.visible)).toEqual(
+            []
+        );
+
+        await zoomTo(camera, 1);
+        curveCreation.emit(
+            'onPreviewDrawDataChange',
+            previewData(
+                graph,
+                new BCurve([C, { x: 250, y: 0 }, { x: 300, y: 0 }])
+            )
+        );
+        curveCreation.emit('onDeletionHighlightChange', { segmentNumber: 0 });
+        catenaryLayout.emit('onHighlightChange', {
+            segmentNumber: 0,
+            kind: 'hover',
+        });
+        const projection = graph.project({ x: 30, y: 0 });
+        curveCreation.emit('onPreviewStartProjectionChange', projection);
+        curveCreation.emit('onPreviewEndProjectionChange', projection);
+
+        expect(shownLaid(host)).toEqual([]);
+        expect(previewPieces().length).toBeGreaterThan(0);
+        expect(previewPieces().filter(([, piece]) => !piece.visible)).toEqual(
+            []
+        );
+        const overlay = topOverlay(host);
+        const [, deletion, catenary, , startDot, endDot] = overlay.children;
+        expect(overlay.visible).toBe(true);
+        expect([deletion, catenary].map(drawn)).toEqual([true, true]);
+        expect(
+            [deletion, catenary, startDot, endDot].map(
+                graphics => graphics!.visible
+            )
+        ).toEqual([true, true, true, true]);
+    });
+
+    for (const zoom of [1, 10]) {
+        it(`draws track laid, raised or restyled while false hidden, and shows it when true (zoom ${zoom})`, async () => {
+            const { host, graph, camera, renderer } = scene({
+                terrain: flatTerrain(5),
+            });
+            await zoomTo(camera, zoom);
+            renderer.drawLaidTrack = false;
+
+            layEverything(graph);
+            expect(shownLaid(host)).toEqual([]);
+
+            // The ramp goes under the ground at both ends: a tunnel and the
+            // dashed underground line replace its cutting.
+            const ramp = graph.trackCurveManager.getTrackSegmentWithJoints(0)!;
+            expect(graph.setJointElevation(ramp.t1Joint, -10)).toBeNull();
+            expect(host.bandKeys).toContain('__underground__0');
+            expect(shownLaid(host)).toEqual([]);
+
+            graph.setSegmentStyle(0, { bed: false, electrified: false });
+            expect(shownLaid(host)).toEqual([]);
+
+            renderer.drawLaidTrack = true;
+
+            expectShownByZoom(host, zoom >= 5);
+        });
+    }
+
+    it('shows track laid while zoomed in as the zoom level has it', async () => {
+        const { host, graph, camera } = scene({ terrain: flatTerrain(5) });
+        await zoomTo(camera, 10);
+
+        layEverything(graph);
+
+        expectShownByZoom(host, true);
+    });
+
+    for (const style of ['centerline', 'rails'] as const) {
+        it(`hides the ${style} lines, with their bridges, and what is drawn while false`, async () => {
+            const { host, graph, camera, renderer } = scene();
+            renderer.renderStyle = style;
+            const { h, v } = crossing(graph);
+            expect(shownLaid(host)).toEqual([
+                `__simplified__${h}`,
+                `__simplified__${v}`,
+            ]);
+
+            renderer.drawLaidTrack = false;
+
+            expect(shownLaid(host)).toEqual([]);
+            await zoomTo(camera, 10);
+            expect(shownLaid(host)).toEqual([]);
+
+            // A new segment under the upper track, which is drawn again; then
+            // raised over it, which swaps the bridge and the gap.
+            const n = layLine(graph, { x: 0, y: 20 }, { x: 100, y: 20 });
+            expect(shownLaid(host)).toEqual([]);
+            const { t0Joint, t1Joint } =
+                graph.trackCurveManager.getTrackSegmentWithJoints(n)!;
+            expect(graph.setJointElevation(t0Joint, 20)).toBeNull();
+            expect(graph.setJointElevation(t1Joint, 20)).toBeNull();
+            expect(shownLaid(host)).toEqual([]);
+            graph.setSegmentStyle(v, { lineStyle: { preset: 'tunnel' } });
+            expect(shownLaid(host)).toEqual([]);
+            renderer.bridgeGapClearance = 2;
+            expect(shownLaid(host)).toEqual([]);
+
+            renderer.drawLaidTrack = true;
+
+            expect(shownLaid(host)).toEqual(
+                [h, v, n].map(segment => `__simplified__${segment}`)
+            );
+            await zoomTo(camera, 1);
+            expect(shownLaid(host)).toHaveLength(3);
+        });
+    }
+
+    it('keeps track hidden across render-style switches', () => {
+        const { host, graph, renderer } = scene({ terrain: flatTerrain(5) });
+        layEverything(graph);
+        renderer.drawLaidTrack = false;
+
+        for (const style of ['centerline', 'rails', 'detailed'] as const) {
+            renderer.renderStyle = style;
+            expect(pieces(host).length).toBeGreaterThan(0);
+            expect(shownLaid(host)).toEqual([]);
+        }
+
+        renderer.drawLaidTrack = true;
+
+        expectShownByZoom(host, false);
+    });
+
+    it('only shows and hides what is drawn, so turning it back on is instant', async () => {
+        const { host, graph, camera, renderer } = scene({
+            terrain: flatTerrain(5),
+        });
+        layEverything(graph);
+        await zoomTo(camera, 10);
+        const before = pieces(host);
+        const changes = [
+            spyOn(host, 'addToBand'),
+            spyOn(host, 'removeFromBand'),
+            spyOn(host, 'addBed'),
+            spyOn(host, 'removeBed'),
+            spyOn(host, 'addShadow'),
+            spyOn(host, 'removeShadow'),
+        ];
+
+        renderer.drawLaidTrack = false;
+        renderer.drawLaidTrack = true;
+
+        for (const change of changes) {
+            expect(change).not.toHaveBeenCalled();
+        }
+        const after = pieces(host);
+        expect(after.map(([name]) => name)).toEqual(
+            before.map(([name]) => name)
+        );
+        expect(
+            after.every(
+                ([, piece], i) => piece === before[i]![1] && !piece.destroyed
+            )
+        ).toBe(true);
+    });
+
+    it('changes nothing when set to the value it has', () => {
+        const { host, graph, renderer } = scene();
+        layTrack(graph, [A, B]);
+        const looked = spyOn(host, 'getDrawable');
+
+        renderer.drawLaidTrack = true;
+        expect(looked).not.toHaveBeenCalled();
+
+        renderer.drawLaidTrack = false;
+        renderer.drawLaidTrack = false;
+        expect(looked).toHaveBeenCalledTimes(1);
     });
 });
