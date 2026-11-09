@@ -7,6 +7,7 @@ import {
     TrackRenderSystem,
     type TrackRenderSystemOptions,
     type TrackTextureRenderer,
+    getElevationColorRgb,
 } from '../src/pixi/track-render-system.js';
 import type { TerrainSampler } from '../src/pixi/tunnel-geometry.js';
 import { TrackGraph } from '../src/tracks/track.js';
@@ -82,6 +83,13 @@ function previewData(
     );
 }
 
+describe('getElevationColorRgb', () => {
+    it('colours a height by its band', () => {
+        expect(getElevationColorRgb(10)).toEqual(getElevationColorRgb(5));
+        expect(getElevationColorRgb(500)).toEqual(getElevationColorRgb(30));
+    });
+});
+
 describe('TrackRenderSystem: laid track', () => {
     it('draws ground track in the ground band, with no shadow or bed', () => {
         const { host, graph } = scene();
@@ -108,7 +116,7 @@ describe('TrackRenderSystem: laid track', () => {
 
         expect(host.bandOf(KEY)).toBe(5);
         expect(host.bandOf(`__rail__${KEY}`)).toBe(5);
-        expect(host.shadowElevationOf(KEY)).toBe(ELEVATION.ABOVE_1);
+        expect(host.shadowElevationOf(KEY)).toBe(10);
     });
 
     it('draws a ramp in the band of its higher end', () => {
@@ -117,7 +125,7 @@ describe('TrackRenderSystem: laid track', () => {
         layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
 
         expect(host.bandOf(KEY)).toBe(4);
-        expect(host.shadowElevationOf(KEY)).toBe(ELEVATION.GROUND);
+        expect(host.shadowElevationOf(KEY)).toBe(0);
     });
 
     it('draws a bed at the track level and catenary in the catenary sublayer', () => {
@@ -126,7 +134,7 @@ describe('TrackRenderSystem: laid track', () => {
 
         layTrack(graph, [A, B], ELEVATION.ABOVE_1);
 
-        expect(host.bedElevationOf(KEY)).toBe(ELEVATION.ABOVE_1);
+        expect(host.bedElevationOf(KEY)).toBe(10);
         expect(host.sublayerOf(`__catenary__${KEY}`)).toBe('catenary');
         expect(host.bandOf(`__catenary__${KEY}`)).toBe(4);
     });

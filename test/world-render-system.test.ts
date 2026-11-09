@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { Container } from 'pixi.js';
 
-import { WorldRenderSystem } from '../src/pixi/world-render-system.js';
-import { LEVEL_HEIGHT } from '../src/tracks/constants.js';
-import { ELEVATION, ELEVATION_VALUES } from '../src/tracks/types.js';
+import {
+    DETAILED_BAND_HEIGHTS,
+    WorldRenderSystem,
+} from '../src/pixi/world-render-system.js';
 
 /** The z-index of the sublayer a container sits in, and of that sublayer's band. */
 function placement(container: Container) {
@@ -14,32 +15,44 @@ function placement(container: Container) {
 }
 
 describe('WorldRenderSystem', () => {
-    it('maps each elevation level to its band, lowest first', () => {
+    it('puts every old level height in its old band', () => {
         const host = new WorldRenderSystem();
 
         expect(host.bandCount).toBe(7);
-        ELEVATION_VALUES.forEach((level, index) => {
-            expect(host.getElevationBandIndex(level * LEVEL_HEIGHT)).toBe(
-                index
-            );
+        DETAILED_BAND_HEIGHTS.forEach((height, index) => {
+            expect(host.getElevationBandIndex(height)).toBe(index);
         });
     });
 
-    it("puts an elevation between levels in the upper level's band", () => {
+    it('uses the band just above a height between bands', () => {
         const host = new WorldRenderSystem();
 
         expect(host.getElevationBandIndex(5)).toBe(4);
-        expect(host.getElevationBandIndex(15)).toBe(5);
-        expect(host.getElevationBandIndex(-5)).toBe(3);
-        expect(host.resolveElevationLevel(15)).toBe(ELEVATION.ABOVE_2);
-        expect(host.resolveElevationLevel(0)).toBe(ELEVATION.GROUND);
+        expect(host.getElevationBandIndex(12.35)).toBe(5);
+        expect(host.getElevationBandIndex(-0.5)).toBe(3);
+        expect(host.resolveElevationLevel(15)).toBe(20);
+        expect(host.resolveElevationLevel(0)).toBe(0);
     });
 
-    it('puts an elevation outside the levels in the ground band', () => {
+    it('clamps heights outside the bands', () => {
         const host = new WorldRenderSystem();
 
-        expect(host.getElevationBandIndex(40)).toBe(3);
-        expect(host.getElevationBandIndex(-40)).toBe(3);
+        expect(host.getElevationBandIndex(-31)).toBe(0);
+        expect(host.getElevationBandIndex(150)).toBe(6);
+        expect(host.resolveElevationLevel(150)).toBe(30);
+        expect(host.resolveElevationLevel(-150)).toBe(-30);
+    });
+
+    it('takes a band height in metres for beds and shadows', () => {
+        const host = new WorldRenderSystem();
+        const bed = new Container();
+        const shadow = new Container();
+
+        host.addBed('b', bed, 10);
+        host.addShadow('s', shadow, -10);
+
+        expect(placement(bed).bandZ).toBe(4);
+        expect(placement(shadow).bandZ).toBe(2);
     });
 
     it('stacks a band as bed, drawable, rail, onTrack, catenary, shadow', () => {
@@ -52,12 +65,12 @@ describe('WorldRenderSystem', () => {
             catenary: new Container(),
             shadow: new Container(),
         };
-        host.addBed('bed', items.bed, ELEVATION.ABOVE_1);
+        host.addBed('bed', items.bed, 10);
         host.addToBand('drawable', items.drawable, 4, 'drawable');
         host.addToBand('rail', items.rail, 4, 'rail');
         host.addToBand('onTrack', items.onTrack, 4, 'onTrack');
         host.addToBand('catenary', items.catenary, 4, 'catenary');
-        host.addShadow('shadow', items.shadow, ELEVATION.ABOVE_1);
+        host.addShadow('shadow', items.shadow, 10);
 
         expect(
             Object.values(items).map(item => placement(item).sublayerZ)
@@ -107,8 +120,8 @@ describe('WorldRenderSystem', () => {
         const host = new WorldRenderSystem();
         const bed = new Container();
         const shadow = new Container();
-        host.addBed('bed', bed, ELEVATION.GROUND);
-        host.addShadow('shadow', shadow, ELEVATION.GROUND);
+        host.addBed('bed', bed, 0);
+        host.addShadow('shadow', shadow, 0);
 
         host.removeBed('bed');
         host.removeShadow('shadow');
@@ -136,7 +149,7 @@ describe('WorldRenderSystem', () => {
         const host = new WorldRenderSystem();
         const items = [new Container(), new Container(), new Container()];
         host.addToBand('banded', items[0], 3, 'rail');
-        host.addBed('bed', items[1], ELEVATION.GROUND);
+        host.addBed('bed', items[1], 0);
         host.addDrawable('unbanded', items[2]);
 
         host.cleanup();

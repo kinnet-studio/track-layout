@@ -1,54 +1,53 @@
 import { Container } from 'pixi.js';
 
-import { LEVEL_HEIGHT } from '../index.js';
-import { ELEVATION, ELEVATION_VALUES } from '../index.js';
 import type { LayerHost } from './layer-host.js';
 
-const getElevationIndex = (elevation: ELEVATION): number => {
-    const i = ELEVATION_VALUES.indexOf(elevation);
-    return i >= 0 ? i : 0;
-};
+/** The heights of the seven Detailed bands, in metres, lowest first. */
+export const DETAILED_BAND_HEIGHTS: readonly number[] = [
+    -30, -20, -10, 0, 10, 20, 30,
+];
 
-/** Use upper bound when between levels so higher-elevation shadow draws on top of lower-elevation content. */
-const getElevationForLayer = (
-    interval: { interval: [ELEVATION, ELEVATION]; ratio: number } | null
-): ELEVATION =>
-    interval
-        ? interval.ratio > 0
-            ? interval.interval[1]
-            : interval.interval[0]
-        : ELEVATION.GROUND;
+const LOWEST_BAND = 0;
+const HIGHEST_BAND = DETAILED_BAND_HEIGHTS.length - 1;
 
 /**
- * Find which two ELEVATION levels a raw elevation value falls between.
+ * Use the upper bound when between bands so higher-elevation shadow draws on
+ * top of lower-elevation content.
+ */
+export const getBandIndexForHeight = (metres: number): number => {
+    if (metres <= DETAILED_BAND_HEIGHTS[LOWEST_BAND]) return LOWEST_BAND;
+    if (metres >= DETAILED_BAND_HEIGHTS[HIGHEST_BAND]) return HIGHEST_BAND;
+    const found = findElevationInterval(metres);
+    if (found === null) return LOWEST_BAND;
+    const lower = DETAILED_BAND_HEIGHTS.indexOf(found.interval[0]);
+    return found.ratio > 0 ? lower + 1 : lower;
+};
+
+/**
+ * Find which two band heights a height in metres falls between.
  *
- * @param elevation - Raw elevation in world units (e.g. 10 for ABOVE_1 when LEVEL_HEIGHT=10)
- * @returns The bounding ELEVATION interval and interpolation ratio, or null if out of range
+ * @param metres - Height in metres
+ * @returns The bounding band heights and interpolation ratio, or null if out of the bands' range
  */
 export const findElevationInterval = (
-    elevation: number
-): { interval: [ELEVATION, ELEVATION]; ratio: number } | null => {
-    const elevations = Object.values(ELEVATION).filter(
-        (v): v is number => typeof v === 'number'
-    );
+    metres: number
+): { interval: [number, number]; ratio: number } | null => {
+    const heights = DETAILED_BAND_HEIGHTS;
     let left = 0;
-    let right = elevations.length - 1;
+    let right = heights.length - 1;
     while (left <= right) {
         const mid = left + Math.floor((right - left) / 2);
-        const midValue = elevations[mid];
+        const low = heights[mid];
         if (
-            midValue * LEVEL_HEIGHT <= elevation &&
-            mid + 1 < elevations.length &&
-            elevations[mid + 1] * LEVEL_HEIGHT >= elevation
+            low <= metres &&
+            mid + 1 < heights.length &&
+            heights[mid + 1] >= metres
         ) {
             return {
-                interval: [elevations[mid], elevations[mid + 1]],
-                ratio:
-                    (elevation - midValue * LEVEL_HEIGHT) /
-                    (elevations[mid + 1] * LEVEL_HEIGHT -
-                        midValue * LEVEL_HEIGHT),
+                interval: [low, heights[mid + 1]],
+                ratio: (metres - low) / (heights[mid + 1] - low),
             };
-        } else if (elevation < midValue * LEVEL_HEIGHT) {
+        } else if (metres < low) {
             right = mid - 1;
         } else {
             left = mid + 1;
@@ -125,13 +124,11 @@ export class WorldRenderSystem implements LayerHost {
     /** Shadow items keyed by string. */
     private _shadowMap: Map<
         string,
-        { container: Container; elevation: ELEVATION }
+        { container: Container; bandHeight: number }
     > = new Map();
     /** Bed items keyed by string (shared per elevation, renders before rails). */
-    private _bedMap: Map<
-        string,
-        { container: Container; elevation: ELEVATION }
-    > = new Map();
+    private _bedMap: Map<string, { container: Container; bandHeight: number }> =
+        new Map();
     /** Band items keyed by string. */
     private _bandItemMap: Map<
         string,
@@ -139,8 +136,8 @@ export class WorldRenderSystem implements LayerHost {
     > = new Map();
     /** Elevation bands indexed by band index. */
     private _bands: ElevationBand[] = [];
-    /** Map from ELEVATION enum value to band index. */
-    private _elevationToBandIndex: Map<ELEVATION, number> = new Map();
+    /** Map from band height in metres to band index. */
+    private _elevationToBandIndex: Map<number, number> = new Map();
 
     /** Container for the base terrain visual (shading + contour lines). Renders below all bands. */
     private _terrainBaseContainer: Container;
@@ -189,7 +186,7 @@ export class WorldRenderSystem implements LayerHost {
         this._terrainBaseContainer.sortableChildren = true;
         this._drawDataBelow.addChild(this._terrainBaseContainer);
 
-        ELEVATION_VALUES.forEach((elevation, i) => {
+        DETAILED_BAND_HEIGHTS.forEach((bandHeight, i) => {
             // Terrain occlusion container sits between band[i-1] and band[i]
             const occlusionContainer = new Container();
             occlusionContainer.zIndex = i - 0.5;
@@ -199,7 +196,7 @@ export class WorldRenderSystem implements LayerHost {
             const band = this._createBand(i);
             this._drawDataBelow.addChild(band.container);
             this._bands.push(band);
-            this._elevationToBandIndex.set(elevation as ELEVATION, i);
+            this._elevationToBandIndex.set(bandHeight, i);
         });
     }
 
@@ -391,18 +388,18 @@ export class WorldRenderSystem implements LayerHost {
      * For buildings: use one level above the base elevation (shadow falls on
      * the ground next to the building, below elevated objects).
      */
-    addShadow(key: string, container: Container, elevation: ELEVATION): void {
-        const bandIndex = this._elevationToBandIndex.get(elevation);
+    addShadow(key: string, container: Container, bandHeight: number): void {
+        const bandIndex = this._elevationToBandIndex.get(bandHeight);
         if (bandIndex !== undefined) {
             this._bands[bandIndex].shadow.addChild(container);
         }
-        this._shadowMap.set(key, { container, elevation });
+        this._shadowMap.set(key, { container, bandHeight });
     }
 
     removeShadow(key: string): void {
         const shadow = this._shadowMap.get(key);
         if (shadow !== undefined) {
-            const bandIndex = this._elevationToBandIndex.get(shadow.elevation);
+            const bandIndex = this._elevationToBandIndex.get(shadow.bandHeight);
             if (bandIndex !== undefined) {
                 this._bands[bandIndex].shadow.removeChild(shadow.container);
             }
@@ -422,18 +419,18 @@ export class WorldRenderSystem implements LayerHost {
      * drawables, preventing one track's bed from covering another track's
      * rails at junctions.
      */
-    addBed(key: string, container: Container, elevation: ELEVATION): void {
-        const bandIndex = this._elevationToBandIndex.get(elevation);
+    addBed(key: string, container: Container, bandHeight: number): void {
+        const bandIndex = this._elevationToBandIndex.get(bandHeight);
         if (bandIndex !== undefined) {
             this._bands[bandIndex].bed.addChild(container);
         }
-        this._bedMap.set(key, { container, elevation });
+        this._bedMap.set(key, { container, bandHeight });
     }
 
     removeBed(key: string): void {
         const bed = this._bedMap.get(key);
         if (bed !== undefined) {
-            const bandIndex = this._elevationToBandIndex.get(bed.elevation);
+            const bandIndex = this._elevationToBandIndex.get(bed.bandHeight);
             if (bandIndex !== undefined) {
                 this._bands[bandIndex].bed.removeChild(bed.container);
             }
@@ -447,22 +444,19 @@ export class WorldRenderSystem implements LayerHost {
     // -------------------------------------------------------------------------
 
     /**
-     * Map a raw elevation value (world units) to the elevation band index
+     * Map a height in metres to the elevation band index
      * used for z-ordering.
      */
-    getElevationBandIndex(rawElevation: number): number {
-        const interval = findElevationInterval(rawElevation);
-        const elevation = getElevationForLayer(interval);
-        return getElevationIndex(elevation);
+    getElevationBandIndex(metres: number): number {
+        return getBandIndexForHeight(metres);
     }
 
     /**
-     * Resolve a raw elevation value to the ELEVATION enum level.
+     * Resolve a height in metres to the height of its band, in metres.
      * Useful for determining which shadow/bed container to use.
      */
-    resolveElevationLevel(rawElevation: number): ELEVATION {
-        const interval = findElevationInterval(rawElevation);
-        return getElevationForLayer(interval);
+    resolveElevationLevel(metres: number): number {
+        return DETAILED_BAND_HEIGHTS[getBandIndexForHeight(metres)];
     }
 
     // -------------------------------------------------------------------------
@@ -480,8 +474,8 @@ export class WorldRenderSystem implements LayerHost {
     }
 
     cleanup(): void {
-        this._shadowMap.forEach(({ container, elevation }) => {
-            const bandIndex = this._elevationToBandIndex.get(elevation);
+        this._shadowMap.forEach(({ container, bandHeight }) => {
+            const bandIndex = this._elevationToBandIndex.get(bandHeight);
             if (bandIndex !== undefined) {
                 this._bands[bandIndex].shadow.removeChild(container);
             }
@@ -489,8 +483,8 @@ export class WorldRenderSystem implements LayerHost {
         });
         this._shadowMap.clear();
 
-        this._bedMap.forEach(({ container, elevation }) => {
-            const bandIndex = this._elevationToBandIndex.get(elevation);
+        this._bedMap.forEach(({ container, bandHeight }) => {
+            const bandIndex = this._elevationToBandIndex.get(bandHeight);
             if (bandIndex !== undefined) {
                 this._bands[bandIndex].bed.removeChild(container);
             }

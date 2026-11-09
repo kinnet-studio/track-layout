@@ -17,6 +17,7 @@ export {
 export type { TerrainSampler } from './tunnel-geometry.js';
 export {
     type BandSublayer,
+    DETAILED_BAND_HEIGHTS,
     WorldRenderSystem,
     findElevationInterval,
 } from './world-render-system.js';

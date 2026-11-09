@@ -17,10 +17,6 @@ import type {
 import { LEVEL_HEIGHT } from '../index.js';
 import { TrackCurveManager } from '../index.js';
 import {
-    ELEVATION,
-    ELEVATION_MAX,
-    ELEVATION_MIN,
-    ELEVATION_VALUES,
     ProjectionPositiveResult,
     TrackSegmentDrawData,
     TrackSegmentWithCollision,
@@ -61,7 +57,11 @@ import {
     type TerrainSampler,
     computeTunnelEntranceGeometry,
 } from './tunnel-geometry.js';
-import { findElevationInterval } from './world-render-system.js';
+import {
+    DETAILED_BAND_HEIGHTS,
+    findElevationInterval,
+    getBandIndexForHeight,
+} from './world-render-system.js';
 
 /** Zoom level above which detailed track draw data is shown; below this only the bezier curve is drawn. */
 const ZOOM_THRESHOLD_DETAILED_TRACK = 5;
@@ -79,9 +79,10 @@ const TRACK_TEX_SIZE = 64;
 const ELEVATION_GRADIENT_WIDTH = 4;
 const ELEVATION_GRADIENT_HEIGHT = 128;
 
-/** Raw elevation range in world units (ELEVATION * LEVEL_HEIGHT). */
-const ELEVATION_RAW_MIN = ELEVATION_MIN * LEVEL_HEIGHT;
-const ELEVATION_RAW_MAX = ELEVATION_MAX * LEVEL_HEIGHT;
+/** Elevation range of the gradient, in metres: the lowest to the highest band. */
+const ELEVATION_RAW_MIN = DETAILED_BAND_HEIGHTS[0];
+const ELEVATION_RAW_MAX =
+    DETAILED_BAND_HEIGHTS[DETAILED_BAND_HEIGHTS.length - 1];
 
 /** Map a raw elevation value to a normalised [0, 1] coordinate into the gradient texture. */
 const normalizeElevation = (rawElevation: number): number =>
@@ -3104,9 +3105,7 @@ export class TrackRenderSystem {
                         Math.max(drawData.elevation.from, drawData.elevation.to)
                     );
                 const shadowBandIndex = Math.max(0, trackBandIndex - 1);
-                const shadowElevation = ELEVATION_VALUES[
-                    shadowBandIndex
-                ] as ELEVATION;
+                const shadowElevation = DETAILED_BAND_HEIGHTS[shadowBandIndex];
                 this._worldRenderSystem.addShadow(
                     key,
                     shadowMesh,
@@ -3941,27 +3940,20 @@ const findElevationColorStop = (elevation: number): Rgb => {
     );
 };
 
-/** Elevation colors as RGB (0–255) for interpolation. */
-export const getElevationColorRgb = (elevation: ELEVATION): Rgb => {
-    switch (elevation) {
-        case ELEVATION.SUB_3:
-            return { r: 255, g: 0, b: 0 };
-        case ELEVATION.SUB_2:
-            return { r: 255, g: 165, b: 0 };
-        case ELEVATION.SUB_1:
-            return { r: 255, g: 255, b: 0 };
-        case ELEVATION.GROUND:
-            return { r: 0, g: 255, b: 0 };
-        case ELEVATION.ABOVE_1:
-            return { r: 0, g: 255, b: 255 };
-        case ELEVATION.ABOVE_2:
-            return { r: 255, g: 0, b: 255 };
-        case ELEVATION.ABOVE_3:
-            return { r: 0, g: 0, b: 255 };
-        default:
-            return { r: 128, g: 128, b: 128 };
-    }
-};
+/** Colours of the Detailed bands as RGB (0-255), lowest band first. */
+const BAND_COLORS: readonly Rgb[] = [
+    { r: 255, g: 0, b: 0 },
+    { r: 255, g: 165, b: 0 },
+    { r: 255, g: 255, b: 0 },
+    { r: 0, g: 255, b: 0 },
+    { r: 0, g: 255, b: 255 },
+    { r: 255, g: 0, b: 255 },
+    { r: 0, g: 0, b: 255 },
+];
+
+/** The colour of the band for a height in metres, as RGB (0-255). */
+export const getElevationColorRgb = (metres: number): Rgb =>
+    BAND_COLORS[getBandIndexForHeight(metres)];
 
 /** Seeded RNG for deterministic procedural texture (mulberry32-style). */
 function seededRng(seed: number): () => number {

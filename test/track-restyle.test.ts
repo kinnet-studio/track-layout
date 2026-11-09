@@ -90,7 +90,7 @@ describe('restyling a laid segment', () => {
     it('adds a bed when bed is turned on, and removes it when turned off', () => {
         const on = restyled({}, { bed: true });
         expect(on.before0.bedElevation).toBeUndefined();
-        expect(on.after0.bedElevation).toBe(ELEVATION.ABOVE_1);
+        expect(on.after0.bedElevation).toBe(10);
 
         const off = restyled({ bed: true }, { bed: false });
         expect(off.after0.bedElevation).toBeUndefined();
