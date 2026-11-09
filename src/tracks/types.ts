@@ -1,5 +1,7 @@
 import { BCurve, Point } from '@ue-too/curve';
 
+import { isValidHeight } from './heights.js';
+
 /** Visual style applied to track rendering. */
 export type TrackStyle = 'ballasted' | 'slab';
 
@@ -324,10 +326,10 @@ export function validateSerializedTrackData(
                 };
             }
         }
-        if (typeof j.elevation !== 'number') {
+        if (!isValidHeight(j.elevation)) {
             return {
                 valid: false,
-                error: `${prefix}.elevation must be a number`,
+                error: `${prefix}.elevation must be a finite height within -200 to 200 m`,
             };
         }
         if (j.direction == null || typeof j.direction !== 'object') {
@@ -424,10 +426,10 @@ export function validateSerializedTrackData(
             };
         }
         const elev = s.elevation as Record<string, unknown>;
-        if (typeof elev.from !== 'number' || typeof elev.to !== 'number') {
+        if (!isValidHeight(elev.from) || !isValidHeight(elev.to)) {
             return {
                 valid: false,
-                error: `${prefix}.elevation.from and .to must be numbers`,
+                error: `${prefix}.elevation must be a finite height within -200 to 200 m`,
             };
         }
 

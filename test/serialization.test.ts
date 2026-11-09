@@ -668,6 +668,42 @@ describe('validateSerializedTrackData', () => {
         expect(validateSerializedTrackData(validData)).toEqual({ valid: true });
     });
 
+    function withJointElevation(elevation: number) {
+        return {
+            ...validData,
+            joints: [
+                { ...validData.joints[0], elevation },
+                validData.joints[1],
+            ],
+        };
+    }
+
+    function withSegmentFrom(from: number) {
+        return {
+            ...validData,
+            segments: [
+                {
+                    ...validData.segments[0],
+                    elevation: { from, to: 0 },
+                },
+            ],
+        };
+    }
+
+    it('refuses heights that are not finite or are out of range', () => {
+        for (const bad of [NaN, Infinity, 200.01, -201]) {
+            expect(
+                validateSerializedTrackData(withJointElevation(bad)).valid
+            ).toBe(false);
+            expect(
+                validateSerializedTrackData(withSegmentFrom(bad)).valid
+            ).toBe(false);
+        }
+        expect(
+            validateSerializedTrackData(withJointElevation(-200)).valid
+        ).toBe(true);
+    });
+
     it('should reject null', () => {
         const result = validateSerializedTrackData(null);
         expect(result.valid).toBe(false);
