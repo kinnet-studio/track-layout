@@ -520,7 +520,6 @@ export class CurveCreationEngine implements LayoutContext {
 
     endCurve(): Point | null {
         const res = this.endCurveInternal();
-        console.log('endCurve', res);
         if (typeof res === 'string') {
             this.cancelCurrentCurve();
             this._lastCurveSuccess = false;
@@ -537,7 +536,6 @@ export class CurveCreationEngine implements LayoutContext {
         if (this._previewCurveForDeletion === null) {
             return;
         }
-        console.log('deleteCurrentCurve', this._previewCurveForDeletion);
         this._trackGraph.removeTrackSegment(this._previewCurveForDeletion);
         this._previewCurveForDeletion = null;
         this._deletionHighlightObservable.notify(null);
@@ -556,12 +554,6 @@ export class CurveCreationEngine implements LayoutContext {
 
         const cps = this._previewCurve.curve.getControlPoints().slice(1, -1);
 
-        console.log(
-            'preview curve',
-            this._previewCurve.curve.getControlPoints()
-        );
-        console.log('cps', cps);
-
         let startJointNumber: number | null = null;
         let endJointNumber: number | null = null;
 
@@ -573,13 +565,6 @@ export class CurveCreationEngine implements LayoutContext {
                 .previewStartAndEndSwitched
                 ? this._previewCurve.curve.derivative(1)
                 : this._previewCurve.curve.derivative(0);
-            if (this._previewCurve.previewStartAndEndSwitched) {
-                console.log('start and end point switched in preview curve');
-            } else {
-                console.log(
-                    'start and end point not switched in preview curve'
-                );
-            }
             if (
                 !extendTrackIsPossible(
                     startJointNumber,
@@ -604,7 +589,6 @@ export class CurveCreationEngine implements LayoutContext {
         }
 
         if (this._newEndJoint.type === 'extendingTrack') {
-            console.log('checking extend track possible for end joint');
             const startJointNumber = this._newEndJoint.constraint.jointNumber;
             const startJointTangent = this._newEndJoint.constraint.tangent;
             const previewCurveTangentInTheDirectionToOtherJoint = this
@@ -643,9 +627,6 @@ export class CurveCreationEngine implements LayoutContext {
             this._newEndJoint.type == 'branchCurve' ||
             this._newEndJoint.type == 'branchJoint'
         ) {
-            console.log('checking if branching curve can be sloped');
-            console.log('start joint elevation', this._newStartJoint.elevation);
-            console.log('end joint elevation', this._newEndJoint.elevation);
             if (this._newStartJoint.elevation != this._newEndJoint.elevation) {
                 console.warn('branching curve can not be sloped');
                 return 'slopedBranch';
@@ -816,8 +797,6 @@ export class CurveCreationEngine implements LayoutContext {
                     trackSegmentNumber,
                     constraint.atT
                 );
-
-            console.log('end joint number', endJointNumber);
         } else {
             res = this._newEndJoint.position;
             endJointNumber = this._newEndJoint.constraint.jointNumber;

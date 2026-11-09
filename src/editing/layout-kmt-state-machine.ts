@@ -201,7 +201,6 @@ export class LayoutHoverForStartingPointState extends TemplateState<
         },
         startDeletion: {
             action: (context, event) => {
-                console.log('startDeletion');
                 context.cancelCurrentCurve();
             },
             defaultTargetState: 'HOVER_FOR_CURVE_DELETION',

@@ -360,8 +360,6 @@ export class TrackCurveManager {
         trackSegmentNumber: number,
         tValInterval: { start: number; end: number }
     ): number | null {
-        console.log(this._trackOrderMap);
-        console.log(JSON.stringify({ trackSegmentNumber, tValInterval }));
         return (
             this._trackOrderMap.get(
                 JSON.stringify({ trackSegmentNumber, tValInterval })

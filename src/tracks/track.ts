@@ -463,7 +463,6 @@ export class TrackGraph {
                 trackSegmentNumber
             );
 
-        console.log('segment', segment);
         if (segment === null) {
             console.warn('segment not found');
             return;
@@ -588,9 +587,6 @@ export class TrackGraph {
         if (sameDirection(tangentAtStartJoint, tangentAtStartJointFromCurve)) {
             startJoint.direction.tangent.add(newJointNumber);
         } else {
-            console.log('different start tangent at branching');
-            console.log('tangent at start joint', tangentAtStartJoint);
-            console.log('tangent from curve', tangentAtStartJointFromCurve);
             startJoint.direction.reverseTangent.add(newJointNumber);
         }
 
@@ -833,7 +829,6 @@ export class TrackGraph {
         controlPoints: Point[],
         gauge: number = 1.067 // in meters
     ): boolean {
-        console.log('connectJoints', startJointNumber, endJointNumber);
         const startJoint = this._jointManager.getJoint(startJointNumber);
         const endJoint = this._jointManager.getJoint(endJointNumber);
 

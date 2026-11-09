@@ -367,6 +367,9 @@ export class TrackRenderSystem {
 
     private _renderStyle: TrackRenderStyle = 'detailed';
 
+    /** Whether laid track is shown; see {@link drawLaidTrack}. */
+    private _drawLaidTrack: boolean = true;
+
     /** Metres a gap reaches past the upper track's parapets, in the line styles. */
     private _bridgeGapClearance: number = GAP_CLEARANCE;
 
@@ -642,7 +645,7 @@ export class TrackRenderSystem {
      * segments it crosses and is near. Removing and adding the segment
      * redraws all of them. The model still holds the segment, so the
      * neighbour redraws on removal see its new heights; the add redraws them
-     * again. New graphics start visible, so the zoom level is applied again.
+     * again. New graphics are shown or hidden as they are drawn.
      */
     private _onSegmentElevationChanged(segmentNumber: number): void {
         const segment =
@@ -650,7 +653,6 @@ export class TrackRenderSystem {
         if (segment === null) return;
         this._onRemoveTrackSegment(segmentNumber);
         this._onAddTrackSegment(segmentNumber, segment);
-        this._applyZoomLod(this._camera.zoomLevel);
     }
 
     /**
@@ -731,6 +733,29 @@ export class TrackRenderSystem {
     }
 
     /**
+     * Whether laid track is drawn. Defaults to true. While it is false,
+     * nothing drawn for laid segments shows, at any zoom level or in any
+     * style: ballast, rails, sleepers and slab, beds, shadows, catenary,
+     * tunnels and cuttings, the zoomed-out line and the dashed underground
+     * line, and the line styles' lines with their bridges and portals.
+     * Previews, highlights and the projection dots still show. It is for a
+     * 3D view, such as `TrackView3D` from `track-layout/three`, that draws
+     * the laid track instead, under a see-through Pixi canvas. Changing it
+     * only shows or hides what is drawn, so it is instant; track laid or
+     * changed while it is false is drawn hidden, and shows when it is true
+     * again.
+     */
+    get drawLaidTrack(): boolean {
+        return this._drawLaidTrack;
+    }
+
+    set drawLaidTrack(draw: boolean) {
+        if (this._drawLaidTrack === draw) return;
+        this._drawLaidTrack = draw;
+        this._applyZoomLod(this._camera.zoomLevel);
+    }
+
+    /**
      * How far, in metres, a gap in the lower track at a bridge reaches past
      * the upper track's parapets, in the `centerline` and `rails` styles.
      * Defaults to 0.5. A value is clamped to 0 to 25, and one that isn't a
@@ -763,62 +788,82 @@ export class TrackRenderSystem {
     }
 
     /**
-     * Toggle track representation by zoom: low zoom shows only the bezier curve;
-     * high zoom shows detailed draw data (elevation segments, shadows) and hides the simplified curve.
-     * The line styles only draw the simplified curve, and show it at every zoom.
+     * Which pieces of laid track show at `zoomLevel`. `zoomedOut`: the line
+     * along each segment and the dashed underground line, below zoom level 5
+     * in `detailed`, and the line styles' drawings, at every zoom level.
+     * `detailed`: ballast, rails, beds, shadows, catenary, tunnels and
+     * cuttings, from zoom level 5 in `detailed`. Neither while
+     * {@link drawLaidTrack} is false.
      */
-    private _applyZoomLod(zoomLevel: number): void {
+    private _laidTrackShown(zoomLevel: number): {
+        zoomedOut: boolean;
+        detailed: boolean;
+    } {
         const useDetailed =
             this._renderStyle === 'detailed' &&
             zoomLevel >= ZOOM_THRESHOLD_DETAILED_TRACK;
+        return {
+            zoomedOut: this._drawLaidTrack && !useDetailed,
+            detailed: this._drawLaidTrack && useDetailed,
+        };
+    }
 
+    /**
+     * Shows or hides each piece of laid track by {@link _laidTrackShown}:
+     * the zoom level, the render style and {@link drawLaidTrack}. A piece
+     * drawn later takes the same rule as it is drawn.
+     */
+    private _applyZoomLod(zoomLevel: number): void {
+        const { zoomedOut, detailed } = this._laidTrackShown(zoomLevel);
+
+        // The zoomed-out line, or a line style's drawing.
         for (const [, entry] of this._simplifiedTrackGraphicsMap) {
-            entry.graphics.visible = !useDetailed;
+            entry.graphics.visible = zoomedOut;
         }
 
         // Dashed underground indicators: only when zoomed out (simplified view)
         for (const [, entry] of this._undergroundIndicatorMap) {
-            entry.graphics.visible = !useDetailed;
+            entry.graphics.visible = zoomedOut;
         }
 
         for (const key of this._drawableKeys) {
             const container = this._worldRenderSystem.getDrawable(key);
             if (container !== undefined) {
-                container.visible = useDetailed;
+                container.visible = detailed;
             }
         }
 
         for (const [, railContainer] of this._offsetRailMap) {
-            railContainer.visible = useDetailed;
+            railContainer.visible = detailed;
         }
 
         for (const [, catenaryContainer] of this._catenaryMap) {
-            catenaryContainer.visible = useDetailed;
+            catenaryContainer.visible = detailed;
         }
 
         for (const [, record] of this._shadowRecords) {
-            record.mesh.visible = useDetailed;
+            record.mesh.visible = detailed;
         }
 
         for (const [, bedMesh] of this._bedMeshMap) {
-            bedMesh.visible = useDetailed;
+            bedMesh.visible = detailed;
         }
 
         // Tunnel meshes (cutting walls/covers, tunnel walls/ceiling): only when zoomed in
         for (const [, g] of this._cuttingMap) {
-            g.visible = useDetailed;
+            g.visible = detailed;
         }
 
         for (const [, g] of this._cuttingCoverMap) {
-            g.visible = useDetailed;
+            g.visible = detailed;
         }
 
         for (const [, g] of this._tunnelWallMap) {
-            g.visible = useDetailed;
+            g.visible = detailed;
         }
 
         for (const [, g] of this._tunnelCeilingMap) {
-            g.visible = useDetailed;
+            g.visible = detailed;
         }
     }
 
@@ -1452,8 +1497,9 @@ export class TrackRenderSystem {
 
     /**
      * Draws a segment in the current line style: into a new graphics object
-     * in the band of its higher end, or, when it is drawn already, into the
-     * same one, cleared.
+     * in the band of its higher end, shown or hidden by
+     * {@link _laidTrackShown}, or, when it is drawn already, into the same
+     * one, cleared.
      */
     private _drawLineSegment(
         curveNumber: number,
@@ -1477,6 +1523,7 @@ export class TrackRenderSystem {
         });
         if (drawn !== undefined) return;
 
+        graphics.visible = this._laidTrackShown(zoom).zoomedOut;
         const bandKey = `__simplified__${curveNumber}`;
         const bandIndex = this._worldRenderSystem.getElevationBandIndex(
             Math.max(input.heights.from, input.heights.to)
@@ -2936,7 +2983,12 @@ export class TrackRenderSystem {
             return;
         }
 
+        // The model sends a segment's draw data, which applies the zoom level,
+        // before the segment, so these lines take the same rule as they are
+        // drawn.
+        const { zoomedOut } = this._laidTrackShown(this._camera.zoomLevel);
         const simplifiedTrackGraphics = buildBezierLine(trackSegment.curve);
+        simplifiedTrackGraphics.visible = zoomedOut;
 
         const height = Math.max(
             trackSegment.elevation.from,
@@ -2999,6 +3051,7 @@ export class TrackRenderSystem {
                     width: 0.8,
                     pixelLine: true,
                 });
+                undergroundGraphics.visible = zoomedOut;
 
                 // Place at the terrain surface elevation band so it appears on top of the terrain.
                 const surfaceElev = Math.max(startTerrainH, endTerrainH);

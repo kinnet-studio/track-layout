@@ -15,6 +15,15 @@ which are peer dependencies.
 bun add track-layout @ue-too/board @ue-too/curve @ue-too/math
 ```
 
+For the 3D view in `track-layout/three`, also add the optional peer `three`
+(`^0.186.1`). TypeScript users also add `@types/three@0.186.0`, because the
+published type declarations import three's types:
+
+```bash
+bun add three@^0.186.1
+bun add -d @types/three@0.186.0 # TypeScript only
+```
+
 ## Example
 
 ```ts
@@ -260,8 +269,13 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       30 m. `host.getElevationBandIndex(metres)` gives the band for a
       height.
 - **Track.** `TrackRenderSystem` draws the track the graph already holds
-  when it is built, then track as the graph adds and removes it. Its
-  options are all optional:
+  when it is built, then track as the graph adds and removes it.
+  `drawLaidTrack` (default `true`) turns off everything drawn for laid
+  segments, at every zoom level and in every style, while previews,
+  highlights and the projection dots still show. It is for a 3D view that
+  draws the laid track instead; see
+  [Drawing a layout in 3D with three.js](#drawing-a-layout-in-3d-with-threejs).
+  Its options are all optional:
     - `textureRenderer`, such as `{ renderer: app.renderer }`. Without it
       detailed track is only the zoomed-out line, and that is hidden from
       zoom level 5 up: zoomed-in track (ballast, rails, beds, shadows,
@@ -367,6 +381,102 @@ new TrackAlignedPlatformRenderSystem(
     graph,
     textureRenderer
 );
+```
+
+## Drawing a layout in 3D with three.js
+
+`track-layout/three` draws the track graph with three.js. It needs the
+optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
+
+- **`TrackScene`.** `new TrackScene(graph)` builds a three.js `Scene` with
+  one group per segment, including the segments the graph already holds.
+  It keeps the groups in step with the graph's add, remove, style and
+  height events, and frees the old geometry when it rebuilds one.
+    - `bounds()` gives the layout's extent in scene coordinates.
+    - `onChange(listener)` calls back after any group is added, rebuilt or
+      removed, and returns a function that stops it.
+    - `dispose()` stops listening and frees the geometry and materials.
+- **`TrackView3D`.** `new TrackView3D(canvas, trackScene, options)` draws a
+  `TrackScene` on a canvas, on demand: only after the scene, the camera or
+  the size changes. It adds its lights and the orbit ground to the scene and
+  takes them out on `dispose()`; the scene stays yours to dispose.
+    - **Straight down.** An orthographic camera. `setTopDown(view)` takes
+      a `BoardView`, the board camera's `position`, `zoomLevel`,
+      `rotation`, `viewPortWidth` and `viewPortHeight`. A world point lands
+      on the same viewport pixel as in Pixi.
+    - **Orbit.** `enterOrbit()` switches to a perspective camera (45° field
+      of view) over the straight-down view's centre, tilted 45° at the same
+      heading, and throws if `setTopDown` hasn't been called yet;
+      `leaveOrbit()` comes back to the newest `setTopDown` view. Left drag or one finger rotates, right drag, Shift+drag or two
+      fingers pan, and the wheel or a pinch zooms. The camera stays at most
+      85° from straight down. A see-through ground plane with a 100 m grid
+      lies at 0 m around the layout while orbiting.
+    - **Rendering.** By default a change renders on the next animation
+      frame. With `autoRender: false` nothing renders until you call
+      `renderIfNeeded()`, for example from another renderer's ticker so
+      both canvases change in the same frame. It returns whether it
+      rendered.
+    - **Size.** `resize(widthCss, heightCss, pixelRatio)` sizes the drawing
+      buffer; the canvas's CSS size is yours. Call it before the first
+      render: until then the view takes its size from the canvas's
+      drawing-buffer pixels, not its CSS size.
+    - **Failure.** `TrackView3D.isSupported()` says whether the browser can
+      give a canvas a WebGL 2 context, and the constructor throws
+      `WebGLUnavailableError` when it can't. `onContextLost(listener)`
+      calls back once if the context is lost; the view stops rendering and
+      does not restore itself, so `dispose()` it.
+- **With Pixi.** Set `drawLaidTrack = false` on `TrackRenderSystem` and put
+  the 3D canvas under a see-through Pixi canvas. Pixi stops drawing the
+  laid track, and keeps drawing stations, platforms, trains, previews and
+  highlights over the 3D track.
+- **Minimum width.** Ballast or slab stays at least `MIN_TRACK_WIDTH_PX`
+  (2 px) wide on screen when you zoom out, and is still depth-tested, so
+  the upper track wins at a crossing. In orbit the minimum is measured at
+  each point's distance from the camera. Rails and catenary show from
+  5 px per metre straight down and always in orbit. Sleepers are a decal
+  that fades out below 5 px per metre.
+- **Axes and height.** World `(x, y)`, with y down, is three.js
+  `(x, -y, height)`, with z up. A height is the ballast top at the
+  centreline (see [Heights](#heights)): the bed and the ballast sides go
+  below it, and the rails and catenary above.
+- **Look.** Base colours follow the Pixi Detailed textures, lit by a
+  directional light from the sun angle (`sunAngleDeg`, 135° by default)
+  and an ambient light. There are no shadows.
+
+```ts
+import { DefaultBoardCamera } from '@ue-too/board';
+import { Application } from 'pixi.js';
+import { TrackGraph } from 'track-layout';
+import { TrackRenderSystem, WorldRenderSystem } from 'track-layout/pixi';
+import { TrackScene, TrackView3D } from 'track-layout/three';
+
+const app = new Application();
+await app.init({ backgroundAlpha: 0 }); // a see-through Pixi canvas
+const camera = new DefaultBoardCamera();
+const graph = new TrackGraph();
+const canvas = document.createElement('canvas'); // put it under app.canvas
+const scene = new TrackScene(graph);
+const view = new TrackView3D(canvas, scene, { autoRender: false });
+// Size the view before its first render.
+view.resize(camera.viewPortWidth, camera.viewPortHeight, devicePixelRatio);
+
+const host = new WorldRenderSystem();
+app.stage.addChild(host.container); // apply the camera's transform to it
+const track = new TrackRenderSystem(host, graph.trackCurveManager, camera);
+track.drawLaidTrack = false; // the 3D canvas draws the laid track
+
+const draw3D = () => {
+    // The board camera is a BoardView. An unchanged view requests no render,
+    // so this renders only after the camera or the scene changes.
+    view.setTopDown(camera);
+    view.renderIfNeeded();
+};
+app.ticker.add(draw3D);
+
+// When you're done with the 3D view:
+app.ticker.remove(draw3D);
+view.dispose();
+scene.dispose();
 ```
 
 ## Development
