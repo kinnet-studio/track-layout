@@ -2,6 +2,7 @@ import type { Point } from '@ue-too/math';
 import { describe, expect, it, spyOn } from 'bun:test';
 
 import { CurveCreationEngine } from '../src/editing/curve-engine.js';
+import { createLayoutStateMachine } from '../src/editing/layout-kmt-state-machine.js';
 import type { DeletionHighlightState } from '../src/editing/preview-types.js';
 import { TrackGraph } from '../src/tracks/track.js';
 
@@ -383,5 +384,85 @@ describe('CurveCreationEngine console output', () => {
 
         expect(segmentDump).not.toHaveBeenCalled();
         expect(jointDump).not.toHaveBeenCalled();
+    });
+});
+
+describe('CurveCreationEngine elevation step and gradient', () => {
+    function withElevationLog() {
+        const { engine } = setup();
+        const log: (number | null)[] = [];
+        engine.onElevationChange(e => log.push(e));
+        return { engine, log };
+    }
+
+    it('steps the current height to multiples of the step', () => {
+        const { engine, log } = withElevationLog();
+        engine.setCurrentJointElevation(12.35);
+        engine.bumpCurrentJointElevation();
+        expect(log.at(-1)).toBe(13);
+        engine.setElevationStep(0.5);
+        engine.lowerCurrentJointElevation();
+        expect(log.at(-1)).toBe(12.5);
+    });
+
+    it('rounds the typed height to a centimetre', () => {
+        const { engine, log } = withElevationLog();
+        engine.setCurrentJointElevation(12.345);
+        expect(log.at(-1)).toBe(12.35);
+    });
+
+    it('clamps the typed height and steps within the range', () => {
+        const { engine, log } = withElevationLog();
+        engine.setCurrentJointElevation(250);
+        expect(log.at(-1)).toBe(200);
+        engine.bumpCurrentJointElevation();
+        expect(log.at(-1)).toBe(200);
+    });
+
+    it('refuses a step below a centimetre', () => {
+        const { engine } = setup();
+        expect(() => engine.setElevationStep(0.001)).toThrow(RangeError);
+        expect(engine.elevationStep).toBe(1);
+    });
+
+    it('rounds the step to a centimetre', () => {
+        const { engine } = setup();
+        engine.setElevationStep(0.254);
+        expect(engine.elevationStep).toBe(0.25);
+    });
+
+    it('steps the start before the first click and the end after it', () => {
+        const { engine } = setup();
+        const machine = createLayoutStateMachine(engine);
+        engine.setElevationStep(2);
+        engine.setCurrentJointElevation(0);
+        machine.happens('startLayout');
+        machine.happens('pointerMove', { x: 0, y: 0 });
+        machine.happens('arrowUp');
+        expect(engine.newStartJointType?.elevation).toBe(2);
+        machine.happens('leftPointerUp', { x: 0, y: 0 });
+        machine.happens('pointerMove', { x: 100, y: 0 });
+        machine.happens('arrowUp');
+        machine.happens('arrowUp');
+        expect(engine.newStartJointType?.elevation).toBe(2);
+        expect(engine.newEndJointType?.elevation).toBe(6);
+    });
+
+    it('gives the gradient of the preview from start to end', () => {
+        const { engine } = setup();
+        engine.setCurrentJointElevation(0);
+        engine.hoverForStartingPoint({ x: 0, y: 0 });
+        engine.startCurve();
+        engine.setCurrentJointElevation(3);
+        engine.hoveringForEndJoint({ x: 100, y: 0 });
+        expect(engine.previewGradient).toBeCloseTo(3, 6);
+        engine.setCurrentJointElevation(-3);
+        engine.hoveringForEndJoint({ x: 100, y: 0 });
+        expect(engine.previewGradient).toBeCloseTo(-3, 6);
+    });
+
+    it('has no gradient without a preview', () => {
+        const { engine } = setup();
+        expect(engine.previewGradient).toBeNull();
     });
 });

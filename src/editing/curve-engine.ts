@@ -10,7 +10,7 @@ import { PointCal } from '@ue-too/math';
 
 import { TrackGraph } from '../index.js';
 import { ProjectionPositiveResult, ProjectionResult } from '../index.js';
-import { HEIGHT_MAX, HEIGHT_MIN, clampHeight } from '../tracks/heights.js';
+import { clampHeight, roundHeight, stepHeight } from '../tracks/heights.js';
 import { LayoutContext } from './layout-kmt-state-machine.js';
 import { PreviewCurveCalculator, TENSION_STEP } from './new-joint.js';
 import type {
@@ -18,6 +18,9 @@ import type {
     PreviewDrawData,
 } from './preview-types.js';
 import { CurveRefusal, NewJointType } from './types.js';
+
+/** The smallest E/D step, in metres. */
+const MIN_ELEVATION_STEP = 0.01;
 
 export class CurveCreationEngine implements LayoutContext {
     private _trackGraph: TrackGraph;
@@ -57,6 +60,7 @@ export class CurveCreationEngine implements LayoutContext {
         new SynchronousObservable<[DeletionHighlightState]>();
 
     public _currentJointElevation: number | null = null;
+    private _elevationStep: number = 1;
     private _elevationObservable: Observable<[number | null]> =
         new SynchronousObservable<[number | null]>();
 
@@ -128,11 +132,29 @@ export class CurveCreationEngine implements LayoutContext {
         // this.cancelCurrentCurve();
     }
 
-    setCurrentJointElevation(elevation: number) {
-        if (elevation != this._currentJointElevation) {
-            this._elevationObservable.notify(elevation);
+    /** The distance E and D move a height by, in metres. */
+    get elevationStep(): number {
+        return this._elevationStep;
+    }
+
+    /** Sets the E/D step, rounded to 0.01 m. Throws below 0.01 m. */
+    setElevationStep(metres: number) {
+        const step = roundHeight(metres);
+        if (!(step >= MIN_ELEVATION_STEP)) {
+            throw new RangeError(
+                `The elevation step must be at least ${MIN_ELEVATION_STEP} m.`
+            );
         }
-        this._currentJointElevation = elevation;
+        this._elevationStep = step;
+    }
+
+    /** Sets the current height, rounded to 0.01 m and clamped to the range. */
+    setCurrentJointElevation(elevation: number) {
+        const next = clampHeight(elevation);
+        if (next != this._currentJointElevation) {
+            this._elevationObservable.notify(next);
+        }
+        this._currentJointElevation = next;
     }
 
     setCurrentGauge(gauge: number) {
@@ -140,133 +162,34 @@ export class CurveCreationEngine implements LayoutContext {
     }
 
     bumpStartJointElevation() {
-        if (
-            this._newStartJoint !== null &&
-            (this._newStartJoint.type === 'branchCurve' ||
-                this._newStartJoint.type === 'branchJoint')
-        ) {
-            return;
-        }
-        const currentElevation =
-            this._currentJointElevation != null
-                ? this._currentJointElevation
-                : 0;
-        if (currentElevation >= HEIGHT_MAX) {
-            return;
-        }
-        this._currentJointElevation = clampHeight(currentElevation + 1);
-        this._elevationObservable.notify(this._currentJointElevation);
-        if (this._newStartJoint === null) {
-            return;
-        }
-        this._newStartJoint.elevation = clampHeight(currentElevation + 1);
-        if (this._newEndJoint === null) {
-            return;
-        }
-        this._updatePreviewCurve(this._newStartJoint, this._newEndJoint);
+        this._step(1, 'start');
     }
 
     bumpEndJointElevation() {
-        if (
-            this._newStartJoint !== null &&
-            (this._newStartJoint.type === 'branchCurve' ||
-                this._newStartJoint.type === 'branchJoint')
-        ) {
-            return;
-        }
-        const currentElevation =
-            this._currentJointElevation != null
-                ? this._currentJointElevation
-                : 0;
-        if (currentElevation >= HEIGHT_MAX) {
-            return;
-        }
-        this._currentJointElevation = clampHeight(currentElevation + 1);
-        this._elevationObservable.notify(this._currentJointElevation);
-        if (this._newEndJoint === null) {
-            return;
-        }
-        this._newEndJoint.elevation = clampHeight(currentElevation + 1);
-        if (this._newStartJoint === null) {
-            return;
-        }
-        this._updatePreviewCurve(this._newStartJoint, this._newEndJoint);
+        this._step(1, 'end');
     }
 
     bumpCurrentJointElevation() {
-        if (
-            this._newStartJoint !== null &&
-            (this._newStartJoint.type === 'branchCurve' ||
-                this._newStartJoint.type === 'branchJoint')
-        ) {
-            return;
-        }
-        const currentElevation =
-            this._currentJointElevation != null
-                ? this._currentJointElevation
-                : 0;
-        if (currentElevation >= HEIGHT_MAX) {
-            return;
-        }
-        this._currentJointElevation = clampHeight(currentElevation + 1);
-        this._elevationObservable.notify(this._currentJointElevation);
+        this._step(1, 'current');
     }
 
     lowerStartJointElevation() {
-        if (
-            this._newStartJoint !== null &&
-            (this._newStartJoint.type === 'branchCurve' ||
-                this._newStartJoint.type === 'branchJoint')
-        ) {
-            return;
-        }
-        const currentElevation =
-            this._currentJointElevation != null
-                ? this._currentJointElevation
-                : 0;
-        if (currentElevation <= HEIGHT_MIN) {
-            return;
-        }
-        this._currentJointElevation = clampHeight(currentElevation - 1);
-        this._elevationObservable.notify(this._currentJointElevation);
-        if (this._newStartJoint === null) {
-            return;
-        }
-        this._newStartJoint.elevation = clampHeight(currentElevation - 1);
-        if (this._newEndJoint === null) {
-            return;
-        }
-        this._updatePreviewCurve(this._newStartJoint, this._newEndJoint);
+        this._step(-1, 'start');
     }
 
     lowerEndJointElevation() {
-        if (
-            this._newStartJoint !== null &&
-            (this._newStartJoint.type === 'branchCurve' ||
-                this._newStartJoint.type === 'branchJoint')
-        ) {
-            return;
-        }
-        const currentElevation =
-            this._currentJointElevation != null
-                ? this._currentJointElevation
-                : 0;
-        if (currentElevation <= HEIGHT_MIN) {
-            return;
-        }
-        this._currentJointElevation = clampHeight(currentElevation - 1);
-        this._elevationObservable.notify(this._currentJointElevation);
-        if (this._newEndJoint === null) {
-            return;
-        }
-        this._newEndJoint.elevation = clampHeight(currentElevation - 1);
-        if (this._newStartJoint === null) {
-            return;
-        }
-        this._updatePreviewCurve(this._newStartJoint, this._newEndJoint);
+        this._step(-1, 'end');
     }
 
     lowerCurrentJointElevation() {
+        this._step(-1, 'current');
+    }
+
+    /**
+     * Moves the current height to the next multiple of the step, and the
+     * start or end joint with it. A branch start keeps its height.
+     */
+    private _step(direction: 1 | -1, which: 'start' | 'end' | 'current') {
         if (
             this._newStartJoint !== null &&
             (this._newStartJoint.type === 'branchCurve' ||
@@ -274,15 +197,30 @@ export class CurveCreationEngine implements LayoutContext {
         ) {
             return;
         }
-        const currentElevation =
-            this._currentJointElevation != null
-                ? this._currentJointElevation
-                : 0;
-        if (currentElevation <= HEIGHT_MIN) {
+        const currentElevation = this._currentJointElevation ?? 0;
+        const next = stepHeight(
+            currentElevation,
+            this._elevationStep,
+            direction
+        );
+        if (next === currentElevation) {
             return;
         }
-        this._currentJointElevation = clampHeight(currentElevation - 1);
-        this._elevationObservable.notify(this._currentJointElevation);
+        this._currentJointElevation = next;
+        this._elevationObservable.notify(next);
+        if (which === 'current') {
+            return;
+        }
+        const joint =
+            which === 'start' ? this._newStartJoint : this._newEndJoint;
+        if (joint === null || this._newStartJoint === null) {
+            return;
+        }
+        joint.elevation = next;
+        if (this._newEndJoint === null) {
+            return;
+        }
+        this._updatePreviewCurve(this._newStartJoint, this._newEndJoint);
     }
 
     onElevationChange(observer: Observer<[number | null]>) {
@@ -531,6 +469,25 @@ export class CurveCreationEngine implements LayoutContext {
         };
     } | null {
         return this._previewCurve;
+    }
+
+    /**
+     * The rise from the laid start to the end over the preview curve's
+     * length, as a percentage. Null with no preview, or one shorter than
+     * 0.01 m.
+     */
+    get previewGradient(): number | null {
+        const preview = this._previewCurve;
+        if (preview === null) {
+            return null;
+        }
+        const length = preview.curve.fullLength;
+        if (!(length >= MIN_ELEVATION_STEP)) {
+            return null;
+        }
+        const { from, to } = preview.elevation;
+        const rise = preview.previewStartAndEndSwitched ? from - to : to - from;
+        return (rise / length) * 100;
     }
 
     get previewStartProjection(): ProjectionPositiveResult | null {
