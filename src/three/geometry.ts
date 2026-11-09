@@ -84,18 +84,31 @@ function unitTangent(curve: BCurve, t: number): Point {
     return { x: d.x / len, y: d.y / len };
 }
 
-function distanceToChord(p: Point, a: Point, b: Point): number {
+type Point3 = { x: number; y: number; z: number };
+
+function distanceToChord(p: Point3, a: Point3, b: Point3): number {
     const abx = b.x - a.x;
     const aby = b.y - a.y;
-    const len2 = abx * abx + aby * aby;
+    const abz = b.z - a.z;
+    const len2 = abx * abx + aby * aby + abz * abz;
     const u =
         len2 === 0
             ? 0
             : Math.max(
                   0,
-                  Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2)
+                  Math.min(
+                      1,
+                      ((p.x - a.x) * abx +
+                          (p.y - a.y) * aby +
+                          (p.z - a.z) * abz) /
+                          len2
+                  )
               );
-    return Math.hypot(p.x - (a.x + u * abx), p.y - (a.y + u * aby));
+    return Math.hypot(
+        p.x - (a.x + u * abx),
+        p.y - (a.y + u * aby),
+        p.z - (a.z + u * abz)
+    );
 }
 
 const CHECKS = [1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8];
@@ -113,32 +126,38 @@ export function sampleSegment(
     to: number
 ): SegmentSample[] {
     const ts: number[] = [0];
+    const elevation = { elevation: { from, to } };
+    // The curve's position and its height at t. Height is linear in t, not in
+    // position, so the chord error is measured in 3D.
+    const at = (t: number): Point3 => {
+        const p = curve.get(t);
+        return { x: p.x, y: p.y, z: getElevationAtT(t, elevation) };
+    };
     const walk = (
         t0: number,
-        p0: Point,
+        p0: Point3,
         t1: number,
-        p1: Point,
+        p1: Point3,
         depth: number
     ) => {
         let worst = 0;
         for (const u of CHECKS) {
             worst = Math.max(
                 worst,
-                distanceToChord(curve.get(t0 + (t1 - t0) * u), p0, p1)
+                distanceToChord(at(t0 + (t1 - t0) * u), p0, p1)
             );
         }
         if (worst > MAX_CHORD_ERROR && depth < MAX_DEPTH) {
             const tm = (t0 + t1) / 2;
-            const pm = curve.get(tm);
+            const pm = at(tm);
             walk(t0, p0, tm, pm, depth + 1);
             walk(tm, pm, t1, p1, depth + 1);
         } else {
             ts.push(t1);
         }
     };
-    walk(0, curve.get(0), 1, curve.get(1), 0);
+    walk(0, at(0), 1, at(1), 0);
 
-    const elevation = { elevation: { from, to } };
     return ts.map(t => {
         const p = curve.get(t);
         const tan = unitTangent(curve, t);

@@ -138,6 +138,38 @@ describe('sampleSegment', () => {
         }
     });
 
+    it('samples an unevenly parametrised sloped straight by height too', () => {
+        // P1 = P0 and P2 = P3: a straight whose t runs fast in the middle.
+        const curve = new BCurve([
+            { x: 0, y: 0 },
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: 0 },
+        ]);
+        const model = { elevation: { from: 0, to: 5 } };
+        const s = sampleSegment(curve, 0, 5);
+        expect(s.length).toBeGreaterThan(2);
+        expect(s[0].t).toBe(0);
+        expect(s[s.length - 1].t).toBe(1);
+        for (const p of s) {
+            expect(p.z).toBeCloseTo(getElevationAtT(p.t, model), 9);
+        }
+        // The mesh interpolates linearly in position along each chord.
+        for (let k = 0; k <= 50; k++) {
+            const t = k / 50;
+            let i = 0;
+            while (i + 2 < s.length && s[i + 1].t <= t) i++;
+            const a = s[i];
+            const b = s[i + 1];
+            const c = curve.get(t);
+            const u = (c.x - a.x) / (b.x - a.x);
+            const z = a.z + (b.z - a.z) * u;
+            expect(Math.abs(z - getElevationAtT(t, model))).toBeLessThanOrEqual(
+                MAX_CHORD_ERROR * 1.5
+            );
+        }
+    });
+
     it('samples the tight curve more densely than the gentle one', () => {
         const per = (c: BCurve) => sampleSegment(c, 0, 0).length / c.fullLength;
         expect(per(TIGHT())).toBeGreaterThan(per(GENTLE()));
