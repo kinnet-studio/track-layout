@@ -53,10 +53,32 @@ function levelToMetres(level: number): number {
         : level;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+/** A segment with finite end heights and a splits array, which can be converted. */
+function hasLevelHeights(segment: unknown): boolean {
+    return (
+        isRecord(segment) &&
+        isRecord(segment.elevation) &&
+        isFiniteNumber(segment.elevation.from) &&
+        isFiniteNumber(segment.elevation.to) &&
+        Array.isArray(segment.splits)
+    );
+}
+
 /**
  * Converts track and station heights saved as levels (-3 to +3) into metres.
- * Returns new objects; the input is not changed. A height that is not a
- * finite number is left as it is so that validation reports it.
+ * Returns new objects; the input is not changed. Malformed data is passed
+ * through as it is, so that validation reports it rather than this
+ * throwing: a joint height that is not a finite number, a segment without
+ * a finite `elevation.from` and `to` or without `splits`, and a station
+ * entry that is not an object or has no finite `elevation`.
  */
 export function levelsToMetres<S extends { elevation: number }>(data: {
     track: SerializedTrackData;
@@ -69,18 +91,23 @@ export function levelsToMetres<S extends { elevation: number }>(data: {
                 ...joint,
                 elevation: levelToMetres(joint.elevation),
             })),
-            segments: data.track.segments.map(segment => ({
-                ...segment,
-                elevation: {
-                    from: levelToMetres(segment.elevation.from),
-                    to: levelToMetres(segment.elevation.to),
-                },
-                splits: [...segment.splits],
-            })),
+            segments: data.track.segments.map(segment =>
+                hasLevelHeights(segment)
+                    ? {
+                          ...segment,
+                          elevation: {
+                              from: levelToMetres(segment.elevation.from),
+                              to: levelToMetres(segment.elevation.to),
+                          },
+                          splits: [...segment.splits],
+                      }
+                    : segment
+            ),
         },
-        stations: data.stations.map(station => ({
-            ...station,
-            elevation: levelToMetres(station.elevation),
-        })),
+        stations: data.stations.map(station =>
+            isRecord(station) && isFiniteNumber(station.elevation)
+                ? { ...station, elevation: levelToMetres(station.elevation) }
+                : station
+        ),
     };
 }

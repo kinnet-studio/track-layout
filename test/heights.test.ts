@@ -6,9 +6,11 @@ import {
     roundHeight,
     stepHeight,
 } from '../src/tracks/heights.js';
-import type {
-    SerializedTrackJoint,
-    SerializedTrackSegment,
+import {
+    type SerializedTrackData,
+    type SerializedTrackJoint,
+    type SerializedTrackSegment,
+    validateSerializedTrackData,
 } from '../src/tracks/types.js';
 
 function joint(jointNumber: number, elevation: number): SerializedTrackJoint {
@@ -100,5 +102,41 @@ describe('levelsToMetres', () => {
         };
         const out = levelsToMetres({ track, stations: [] });
         expect(out.track.joints[0].elevation).toBeNaN();
+    });
+
+    it('passes malformed entries through unchanged for validation', () => {
+        const noHeights = { ...segment(0, 0, 1, 1, 1, []), elevation: null };
+        const noSplits = { ...segment(1, 0, 1, 1, 1, []), splits: undefined };
+        const nanTo = segment(2, 0, 1, 1, NaN, [0.5]);
+        const good = segment(3, 0, 1, 1, 2, [0.5]);
+        const track = {
+            joints: [joint(0, 1), joint(1, 1)],
+            segments: [noHeights, noSplits, nanTo, good],
+        } as unknown as SerializedTrackData;
+        const stations = [
+            null,
+            { name: 'no height' },
+            { name: 'infinite', elevation: Infinity },
+            { name: 'good', elevation: 1 },
+        ] as unknown as { elevation: number }[];
+
+        const out = levelsToMetres({ track, stations });
+
+        expect(out.track.segments).toEqual([
+            noHeights,
+            noSplits,
+            nanTo,
+            { ...good, elevation: { from: 10, to: 20 } },
+        ] as unknown as SerializedTrackSegment[]);
+        expect(out.stations).toEqual([
+            null,
+            { name: 'no height' },
+            { name: 'infinite', elevation: Infinity },
+            { name: 'good', elevation: 10 },
+        ] as unknown as { elevation: number }[]);
+        expect(validateSerializedTrackData(out.track)).toEqual({
+            valid: false,
+            error: 'segments[0].elevation must be {from, to}',
+        });
     });
 });
