@@ -597,6 +597,11 @@ export class TrackGraph {
         return true;
     }
 
+    /**
+     * Creates a joint with no track at `position`. Its height, in metres, is
+     * rounded to 0.01 m but not clamped: callers keep it within
+     * `HEIGHT_MIN`…`HEIGHT_MAX`, or the saved graph won't validate.
+     */
     createNewEmptyJoint(
         position: Point,
         tangent: Point,
@@ -1364,6 +1369,12 @@ export class TrackGraph {
      * rules are not checked, so a junction can be left with a sloped branch.
      * Returns why nothing changed, or null; a height the joint already has
      * changes nothing and returns null.
+     *
+     * One event fires per rebuilt segment, as each is rebuilt, so while an
+     * earlier segment's event runs the joint's later segments still hold
+     * their old heights. The graph is fully consistent only once this
+     * returns: a listener that reads neighbouring segments should defer the
+     * read, for example to the next frame.
      */
     setJointElevation(
         joint: number,
@@ -1409,7 +1420,12 @@ export class TrackGraph {
         return null;
     }
 
-    /** Subscribe to segment height changes, such as from setJointElevation. */
+    /**
+     * Subscribe to segment height changes, such as from setJointElevation.
+     * It fires once per rebuilt segment, before setJointElevation has
+     * rebuilt the joint's other segments, so defer any read of neighbouring
+     * segments until setJointElevation has returned.
+     */
     onSegmentElevationChanged(
         callback: (segmentNumber: number) => void,
         options?: SubscriptionOptions

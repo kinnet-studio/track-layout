@@ -307,7 +307,12 @@ export class TrackCurveManager {
         return true;
     }
 
-    /** Subscribe to height changes made with setSegmentElevation. */
+    /**
+     * Subscribe to height changes made with setSegmentElevation. It fires
+     * once per segment; when TrackGraph.setJointElevation rebuilds several,
+     * the later ones still hold their old heights while an earlier one's
+     * event runs, so defer any read of neighbouring segments.
+     */
     onSegmentElevationChanged(
         callback: (segmentNumber: number) => void,
         options?: SubscriptionOptions
@@ -844,6 +849,12 @@ export class TrackCurveManager {
         return projectionInfo;
     }
 
+    /**
+     * Lays a segment between two joints and splits it at the crossings its
+     * heights make. The end heights, in metres, are rounded to 0.01 m but
+     * not clamped: callers keep them within `HEIGHT_MIN`…`HEIGHT_MAX`, or
+     * the saved graph won't validate.
+     */
     createCurveWithJoints(
         curve: BCurve,
         t0Joint: number,

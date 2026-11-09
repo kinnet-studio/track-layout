@@ -68,6 +68,11 @@ export class StationManager {
         this._onDestroyStation = cb;
     }
 
+    /**
+     * Creates a station and returns its id. Its height, in metres, is
+     * rounded to 0.01 m but not clamped: callers keep it within
+     * `HEIGHT_MIN`…`HEIGHT_MAX`.
+     */
     createStation(station: Omit<Station, 'id'>): number {
         const id = this._manager.createEntity({
             ...station,

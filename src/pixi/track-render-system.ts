@@ -3129,7 +3129,7 @@ export class TrackRenderSystem {
                 }
 
                 // Place shadow one elevation band below the track so terrain
-                // occlusion at the track's own level properly hides it.
+                // occlusion in the track's own band properly hides it.
                 // e.g. a 20 m track's shadow goes in the 10 m band; hidden by terrain at 20 m or more.
                 const trackBandIndex =
                     this._worldRenderSystem.getElevationBandIndex(

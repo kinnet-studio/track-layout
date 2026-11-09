@@ -44,16 +44,25 @@ third argument, and the example above lays flat track at 0 m.
   `clampHeight` and `isValidHeight` are exported for your own code.
 - **Migrating level saves.** Older saves held heights as whole levels of
   10 m, from -3 to +3. `levelsToMetres` converts a save's track and
-  stations before you load them. It returns new objects.
+  stations before you load them. It returns new objects, and passes
+  malformed entries through as they are for validation to report.
+  `stationManager.serialize()` writes its stations inside a `stations`
+  field, so pass the inner array.
 
     ```ts
-    import { levelsToMetres } from 'track-layout';
+    import { StationManager, levelsToMetres } from 'track-layout';
 
+    // `old` holds what graph.serialize() and stationManager.serialize()
+    // wrote, in levels.
     const migrated = levelsToMetres({
         track: old.track,
-        stations: old.stations,
+        stations: old.stations.stations,
     });
     await graph.loadFromSerializedData(migrated.track);
+    const stationManager = StationManager.deserialize({
+        ...old.stations,
+        stations: migrated.stations,
+    });
     ```
 
 - **Changing a laid joint's height.** `graph.setJointElevation(joint, metres)`
@@ -70,15 +79,49 @@ third argument, and the example above lays flat track at 0 m.
 - **Reacting to it.** `graph.onSegmentElevationChanged(segmentNumber => ...)`
   fires for each rebuilt segment. The segment's pieces are deleted and added
   again through the usual draw-data events, with no segment add or remove
-  event. `TrackRenderSystem` listens: after a height change it redraws the
-  segment's pieces, its zoomed-out line and its underground mark, and, in
-  `'centerline'` and `'rails'`, the crossings the segment takes part in.
+  event. One event fires per segment, as each is rebuilt, so the graph is
+  fully consistent only once `setJointElevation` returns: a listener that
+  reads neighbouring segments should defer the read. `TrackRenderSystem`
+  listens: after a height change it redraws the segment's pieces, its
+  zoomed-out line and its underground mark, and, in `'centerline'` and
+  `'rails'`, the crossings the segment takes part in.
 
 ```ts
 const refused = graph.setJointElevation(joint, 7.5);
 if (refused !== null) showWarning(refused);
 graph.onSegmentElevationChanged(n => console.log('redraw', n));
 ```
+
+## Upgrading from 0.13
+
+0.14.0 holds heights in metres where 0.13.0 held levels.
+
+- **Removed exports.** `ELEVATION`, `ELEVATION_VALUES`, `ELEVATION_MIN`,
+  `ELEVATION_MAX` and `LEVEL_HEIGHT` are gone. Use a height in metres
+  instead (`ELEVATION.GROUND` is 0, `ELEVATION.ABOVE_1` is 10,
+  `ELEVATION.SUB_1` is -10, and so on), within `HEIGHT_MIN` to
+  `HEIGHT_MAX`.
+- **Changes that still compile.** These now take or give metres, so code
+  that passes or reads levels builds without an error but means something
+  else:
+    - **Station and platform heights.** `createIslandStation({ elevation })`,
+      `StationManager.createStation` and
+      `TrackAlignedPlatformRenderSystem.addPlatform(id, elevation)` take
+      metres: 1 now means 1 m, not level 1 (10 m).
+    - **Beds and shadows.** `LayerHost.addBed` and `addShadow` take a band
+      height in metres, such as 10 where 0.13 took level 1.
+    - **Band helpers.** `host.resolveElevationLevel` and
+      `findElevationInterval` return band heights in metres, such as 10,
+      instead of levels.
+    - **Stepping.** The engine's bump and lower methods step 1 m by
+      default, where they moved one 10 m level. Call
+      `engine.setElevationStep(10)` to step 10 m as before.
+    - **Engine events.** `engine.onElevationChange` reports metres.
+    - **Heights beyond the bands.** `host.getElevationBandIndex` clamps a
+      height below -30 m or above 30 m to the lowest or highest band, where
+      0.13 put it in the ground band.
+- **Saved data.** Convert track and stations saved in levels with
+  `levelsToMetres` before you load them (see [Heights](#heights)).
 
 ## Laying and editing track
 

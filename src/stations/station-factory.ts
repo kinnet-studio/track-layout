@@ -40,6 +40,10 @@ export type CreateIslandStationOptions = {
     direction: Point;
     /** Length of the station / platform (meters). */
     length: number;
+    /**
+     * Height of the station and its tracks, in metres. Rounded to 0.01 m but
+     * not clamped: keep it within `HEIGHT_MIN`…`HEIGHT_MAX`.
+     */
     elevation: number;
     name?: string;
     gauge?: number;
