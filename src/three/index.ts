@@ -1,6 +1,8 @@
-export * from './camera.js';
-export * from './geometry.js';
-export * from './materials.js';
-export * from './track-scene.js';
-export * from './orbit.js';
-export * from './track-view.js';
+export type { BoardView } from './camera.js';
+export { MIN_TRACK_WIDTH_PX } from './materials.js';
+export { TrackScene } from './track-scene.js';
+export {
+    TrackView3D,
+    type TrackView3DOptions,
+    WebGLUnavailableError,
+} from './track-view.js';

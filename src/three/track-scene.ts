@@ -43,6 +43,11 @@ export class TrackScene {
         ];
     }
 
+    /**
+     * Segment `segment`'s group, if it has one.
+     *
+     * @internal For tests; not part of the API, and may change.
+     */
     groupOf(segment: number): Group | undefined {
         return this._entries.get(segment)?.group;
     }

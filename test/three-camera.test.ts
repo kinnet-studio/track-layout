@@ -8,7 +8,7 @@ import {
     TOP_DOWN_NEAR_FAR,
     applyTopDownCamera,
     worldToScene,
-} from '../src/three/index.js';
+} from '../src/three/camera.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
