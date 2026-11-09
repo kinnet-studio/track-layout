@@ -308,9 +308,10 @@ function runningStrip(runningColor: number): Extension {
 }
 
 /**
- * Polygon offsets (factor and units) that order the parts where they meet at
- * one depth: the bed under the surfaces, slab over ballast, the sleepers over
- * both, and the rails over everything.
+ * Polygon offsets that order the parts where they meet at one depth: the bed
+ * under the surfaces, slab over ballast, the sleepers over both, and the rails
+ * over everything. Each is the material's units, and its factor too while the
+ * camera is a perspective one (`TrackMaterials.update` sets the factor).
  */
 const POLYGON_OFFSET = {
     bed: -1,
@@ -382,8 +383,10 @@ const isOrthographic = (camera: Camera): camera is OrthographicCamera =>
  *
  * Same-height surfaces of a style share one plain colour, so overlaps at a
  * junction or diamond can't flicker; where two segments' sleepers overlap,
- * both show. The polygon offsets (factor and units) order the parts at one
- * depth: bed −1, ballast −2, slab −3, sleepers −4, rails −5.
+ * both show. The polygon offsets order the parts at one depth: bed −1,
+ * ballast −2, slab −3, sleepers −4, rails −5. They are always the units; a
+ * perspective camera also uses them as the factor, and an orthographic camera
+ * sets the factor to 0 (see `update`).
  */
 export class TrackMaterials {
     readonly uniforms: TrackUniforms = {
@@ -427,6 +430,9 @@ export class TrackMaterials {
     /** The masts and the contact wire. */
     readonly catenary = lambert('catenary', 0x606060, null);
 
+    /** Whether the polygon offsets have their factor; unset until `update`. */
+    private offsetFactorOn: boolean | undefined;
+
     /**
      * Feed the camera into the shared uniforms. `viewportHeightPx` is the
      * viewport height in the pixels the minimum width counts: CSS pixels, as
@@ -435,6 +441,14 @@ export class TrackMaterials {
      * Zoomed out far enough that the sleepers have faded, an orthographic
      * camera hides the decals to skip their draws. A perspective camera
      * fades them per vertex, so they stay visible.
+     *
+     * The camera type also sets the polygon offsets' factor, which pulls a
+     * face forward by its depth slope. Looking straight down, the flat tops
+     * have none, so the factor would only pull the sloped shoulders forward,
+     * over a crossing track's top and sleepers; an orthographic camera sets it
+     * to 0, and the units alone order the parts. In perspective the tops slope
+     * in depth too, and without the factor ballast shows through slab, so a
+     * perspective camera sets it equal to the units.
      */
     update(camera: Camera, viewportHeightPx: number): void {
         if (!(viewportHeightPx > 0)) return;
@@ -445,11 +459,13 @@ export class TrackMaterials {
             u.uPerspective.value = 1;
             u.uFovTan.value =
                 Math.tan((camera.fov * Math.PI) / 360) / camera.zoom;
+            this.setOffsetFactor(true);
         } else if (isOrthographic(camera)) {
             u.uPerspective.value = 0;
             u.uMetresPerPixel.value =
                 (camera.top - camera.bottom) / camera.zoom / viewportHeightPx;
             sleepersShown = u.uMetresPerPixel.value < SLEEPER_FADE_END;
+            this.setOffsetFactor(false);
         }
         this.ballastSleepers.visible = sleepersShown;
         this.slabSleepers.visible = sleepersShown;
@@ -462,7 +478,11 @@ export class TrackMaterials {
     }
 
     dispose(): void {
-        for (const material of [
+        for (const material of this.all()) material.dispose();
+    }
+
+    private all(): MeshLambertMaterial[] {
+        return [
             this.ballast,
             this.ballastSleepers,
             this.slab,
@@ -470,8 +490,16 @@ export class TrackMaterials {
             this.bed,
             this.rails,
             this.catenary,
-        ]) {
-            material.dispose();
+        ];
+    }
+
+    /** Give the offset materials a factor equal to their units, or none. */
+    private setOffsetFactor(on: boolean): void {
+        if (on === this.offsetFactorOn) return;
+        this.offsetFactorOn = on;
+        for (const material of this.all()) {
+            if (!material.polygonOffset) continue;
+            material.polygonOffsetFactor = on ? material.polygonOffsetUnits : 0;
         }
     }
 }

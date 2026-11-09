@@ -188,23 +188,60 @@ describe('TrackMaterials', () => {
         ]);
     });
 
-    it('offsets the bed, surfaces and rails so they never fight', () => {
+    it('offsets the parts by units, with the slope factor only in perspective', () => {
         const m = new TrackMaterials();
-        const offsets = (part: Material) => [
-            part.polygonOffset,
-            part.polygonOffsetFactor,
-            part.polygonOffsetUnits,
-        ];
-        expect(offsets(m.bed)).toEqual([true, -1, -1]);
-        expect(offsets(m.ballast)).toEqual([true, -2, -2]);
-        expect(offsets(m.slab)).toEqual([true, -3, -3]);
-        expect(offsets(m.ballastSleepers)).toEqual([true, -4, -4]);
-        expect(offsets(m.slabSleepers)).toEqual([true, -4, -4]);
-        expect(offsets(m.rails)).toEqual([true, -5, -5]);
-        expect(offsets(m.catenary)[0]).toBe(false);
+        const units = {
+            bed: -1,
+            ballast: -2,
+            slab: -3,
+            ballastSleepers: -4,
+            slabSleepers: -4,
+            rails: -5,
+        };
+        const offsets = () =>
+            Object.fromEntries(
+                Object.keys(units).map(name => {
+                    const part = m[name as keyof typeof units];
+                    return [
+                        name,
+                        [
+                            part.polygonOffset,
+                            part.polygonOffsetFactor,
+                            part.polygonOffsetUnits,
+                        ],
+                    ];
+                })
+            );
+        const expected = (withFactor: boolean) =>
+            Object.fromEntries(
+                Object.entries(units).map(([name, u]) => [
+                    name,
+                    [true, withFactor ? u : 0, u],
+                ])
+            );
+        const perspective = new PerspectiveCamera(45, WIDTH / HEIGHT);
+
+        m.update(orthoAtZoom(10), 720);
+        expect(offsets()).toEqual(expected(false));
+        m.update(perspective, 720);
+        expect(offsets()).toEqual(expected(true));
+        m.update(orthoAtZoom(20), 720);
+        expect(offsets()).toEqual(expected(false));
+
+        expect(m.catenary.polygonOffset).toBe(false);
         for (const part of allParts(m)) {
             expect(part.depthTest).toBe(true);
         }
+    });
+
+    it('sets the offset factor only when the camera type changes', () => {
+        const m = new TrackMaterials();
+        m.update(orthoAtZoom(10), 720);
+        m.rails.polygonOffsetFactor = 7; // a marker the next update must keep
+        m.update(orthoAtZoom(40), 720);
+        expect(m.rails.polygonOffsetFactor).toBe(7);
+        m.update(new PerspectiveCamera(45, WIDTH / HEIGHT), 720);
+        expect(m.rails.polygonOffsetFactor).toBe(-5);
     });
 
     it('blends the sleeper decals over their surface without writing depth', () => {
