@@ -6,6 +6,7 @@ import {
     normalizeElevation,
 } from '../src/pixi/track-render-system.js';
 import { TrackGraph } from '../src/tracks/track.js';
+import { TrackJointManager } from '../src/tracks/trackjoint-manager.js';
 import { layLine } from './track-helpers.js';
 
 function elevationOf(graph: TrackGraph, jointNumber: number) {
@@ -72,6 +73,15 @@ describe('heights in the model', () => {
         const g = new TrackGraph();
         await g.loadFromSerializedData(data);
         expect(elevationOf(g, data.joints[0].jointNumber)).toBe(1.23);
+    });
+
+    it('rounds joint heights in TrackJointManager.deserialize', () => {
+        const source = new TrackGraph();
+        layLine(source, { x: 0, y: 0 }, { x: 100, y: 0 }, 5);
+        const joints = source.serialize().joints;
+        joints[0].elevation = 1.234;
+        const manager = TrackJointManager.deserialize(joints);
+        expect(manager.getJoint(joints[0].jointNumber)!.elevation).toBe(1.23);
     });
 
     it('exports no level names', async () => {

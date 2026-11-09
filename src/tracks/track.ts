@@ -353,7 +353,8 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: 0,
+            // the segment is flat, so the new joint is at its height
+            elevation: t0Joint.elevation,
         };
 
         const newJointNumber = this._jointManager.createJoint(newJoint);
