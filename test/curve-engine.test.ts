@@ -419,9 +419,29 @@ describe('CurveCreationEngine elevation step and gradient', () => {
         expect(log.at(-1)).toBe(200);
     });
 
+    it('refuses a height that is not a finite number', () => {
+        const { engine, log } = withElevationLog();
+        engine.setCurrentJointElevation(3);
+        for (const bad of [NaN, Infinity, -Infinity]) {
+            expect(() => engine.setCurrentJointElevation(bad)).toThrow(
+                RangeError
+            );
+        }
+        expect(log).toEqual([3]);
+        expect(engine._currentJointElevation).toBe(3);
+    });
+
     it('refuses a step below a centimetre', () => {
         const { engine } = setup();
         expect(() => engine.setElevationStep(0.001)).toThrow(RangeError);
+        expect(engine.elevationStep).toBe(1);
+    });
+
+    it('refuses a step that is not a finite number', () => {
+        const { engine } = setup();
+        for (const bad of [NaN, Infinity, -Infinity]) {
+            expect(() => engine.setElevationStep(bad)).toThrow(RangeError);
+        }
         expect(engine.elevationStep).toBe(1);
     });
 

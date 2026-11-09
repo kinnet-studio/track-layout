@@ -137,8 +137,16 @@ export class CurveCreationEngine implements LayoutContext {
         return this._elevationStep;
     }
 
-    /** Sets the E/D step, rounded to 0.01 m. Throws below 0.01 m. */
+    /**
+     * Sets the E/D step, rounded to 0.01 m. Throws a `RangeError` below
+     * 0.01 m or for a value that is not a finite number.
+     */
     setElevationStep(metres: number) {
+        if (!Number.isFinite(metres)) {
+            throw new RangeError(
+                'The elevation step must be a finite number of metres.'
+            );
+        }
         const step = roundHeight(metres);
         if (!(step >= MIN_ELEVATION_STEP)) {
             throw new RangeError(
@@ -148,8 +156,16 @@ export class CurveCreationEngine implements LayoutContext {
         this._elevationStep = step;
     }
 
-    /** Sets the current height, rounded to 0.01 m and clamped to the range. */
+    /**
+     * Sets the current height, rounded to 0.01 m and clamped to the range.
+     * Throws a `RangeError` for a value that is not a finite number.
+     */
     setCurrentJointElevation(elevation: number) {
+        if (!Number.isFinite(elevation)) {
+            throw new RangeError(
+                'The elevation must be a finite number of metres.'
+            );
+        }
         const next = clampHeight(elevation);
         if (next != this._currentJointElevation) {
             this._elevationObservable.notify(next);
