@@ -10,7 +10,6 @@ import type { TrackTextureRenderer } from '../src/pixi/track-render-system.js';
 import { createIslandStation } from '../src/stations/station-factory.js';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import {
     RecordingLayerHost,
     type StrokedLine,
@@ -27,7 +26,7 @@ import { bareStation } from './station-placement-helpers.js';
  * is built; the fixture removes it so each test draws it itself.
  */
 function scene(
-    elevation = ELEVATION.GROUND,
+    elevation = 0,
     texture: TrackTextureRenderer | null = textureRenderer
 ) {
     const host = new RecordingLayerHost();
@@ -46,7 +45,7 @@ function scene(
 
 describe('StationRenderSystem', () => {
     it("draws a station's platforms in the drawable sublayer of its band, at order 450", () => {
-        const { host, renderer, id } = scene(ELEVATION.ABOVE_1);
+        const { host, renderer, id } = scene(10);
 
         renderer.addStation(id);
 
@@ -73,7 +72,7 @@ describe('StationRenderSystem', () => {
             position: { x: 0, y: 100 },
             direction: { x: 1, y: 0 },
             length: 100,
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
             trackSpacing: 30,
         });
 
@@ -97,7 +96,7 @@ describe('StationRenderSystem', () => {
             position: { x: 0, y: 100 },
             direction: { x: 1, y: 0 },
             length: 100,
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
             trackSpacing: 2.6,
             platformOffset: 1.2,
         });
@@ -113,7 +112,7 @@ describe('StationRenderSystem', () => {
     });
 
     it('draws empty platforms without a texture renderer', () => {
-        const { host, renderer, id } = scene(ELEVATION.GROUND, null);
+        const { host, renderer, id } = scene(0, null);
 
         renderer.addStation(id);
 
@@ -203,7 +202,7 @@ describe('StationRenderSystem: outline style', () => {
     });
 
     it('draws the outlines without a texture renderer', () => {
-        const { host, renderer, id } = scene(ELEVATION.GROUND, null);
+        const { host, renderer, id } = scene(0, null);
         renderer.renderStyle = 'outline';
 
         renderer.addStation(id);
@@ -212,7 +211,7 @@ describe('StationRenderSystem: outline style', () => {
     });
 
     it('redraws its stations when the style changes', () => {
-        const { host, renderer, id } = scene(ELEVATION.ABOVE_1);
+        const { host, renderer, id } = scene(10);
         renderer.addStation(id);
         const textured = host.bandItem(`station-${id}`)!;
 

@@ -1,7 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { StationManager } from '../src/stations/station-manager.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -11,7 +10,7 @@ function makeStationSeed() {
     return {
         name: 'test',
         position: { x: 0, y: 0 },
-        elevation: ELEVATION.GROUND,
+        elevation: 0,
         platforms: [],
         trackSegments: [],
         joints: [],

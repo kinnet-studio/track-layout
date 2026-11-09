@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 
 import { StationManager } from '../src/stations/station-manager.js';
 import type { Platform } from '../src/stations/types.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 function makePlatform(track: number): Platform {
     return {
@@ -28,7 +27,7 @@ function setupStationWithPlatform(track: number) {
     const stationId = mgr.createStation({
         name: 'S',
         position: { x: 0, y: 0 },
-        elevation: ELEVATION.GROUND,
+        elevation: 0,
         platforms: [makePlatform(track)],
         trackSegments: [track],
         joints: [],

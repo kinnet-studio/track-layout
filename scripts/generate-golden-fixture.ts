@@ -8,6 +8,10 @@
  * Run once, right after the verbatim port, and commit the output. Re-running
  * it after the model changes would produce a different file.
  *
+ * Heights below are levels, as the old model saved them. The model now reads
+ * heights as metres, so re-running this script no longer reproduces the
+ * fixture; keep it as a record of how the fixture was made.
+ *
  * Usage: bun scripts/generate-golden-fixture.ts
  */
 import { writeFileSync } from 'node:fs';
@@ -18,7 +22,6 @@ import { StationManager } from '../src/stations/station-manager.js';
 import { TrackAlignedPlatformManager } from '../src/stations/track-aligned-platform-manager.js';
 import { JointDirectionPreferenceMap } from '../src/tracks/joint-direction-preference-map.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 const GAUGE = 1.067;
 
@@ -38,9 +41,9 @@ const east = { x: 1, y: 0 };
 const north = { x: 0, y: 1 };
 
 // Main line A-B, then a curve B-C.
-const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, east, ELEVATION.GROUND);
-const b = graph.createNewEmptyJoint({ x: 100, y: 0 }, east, ELEVATION.GROUND);
-const c = graph.createNewEmptyJoint({ x: 200, y: 50 }, east, ELEVATION.GROUND);
+const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, east, 0);
+const b = graph.createNewEmptyJoint({ x: 100, y: 0 }, east, 0);
+const c = graph.createNewEmptyJoint({ x: 200, y: 50 }, east, 0);
 graph.connectJoints(a, b, [{ x: 50, y: 0 }], GAUGE);
 graph.connectJoints(b, c, [{ x: 150, y: 0 }], GAUGE);
 
@@ -50,29 +53,17 @@ const m = graph.insertJointIntoTrackSegmentUsingTrackNumber(abSegment, 0.5);
 if (m === null) {
     throw new Error('split failed');
 }
-const d = graph.createNewEmptyJoint(
-    { x: 100, y: -40 },
-    { x: 1, y: -1 },
-    ELEVATION.GROUND
-);
+const d = graph.createNewEmptyJoint({ x: 100, y: -40 }, { x: 1, y: -1 }, 0);
 graph.connectJoints(m, d, [{ x: 80, y: 0 }], GAUGE);
 
 // Elevated line crossing the main line.
-const e = graph.createNewEmptyJoint(
-    { x: 75, y: -80 },
-    north,
-    ELEVATION.ABOVE_1
-);
-const f = graph.createNewEmptyJoint({ x: 75, y: 80 }, north, ELEVATION.ABOVE_1);
+const e = graph.createNewEmptyJoint({ x: 75, y: -80 }, north, 1);
+const f = graph.createNewEmptyJoint({ x: 75, y: 80 }, north, 1);
 graph.connectJoints(e, f, [{ x: 75, y: 0 }], GAUGE);
 
 // Sloped ramp.
-const g = graph.createNewEmptyJoint({ x: 200, y: -50 }, east, ELEVATION.GROUND);
-const h = graph.createNewEmptyJoint(
-    { x: 300, y: -50 },
-    east,
-    ELEVATION.ABOVE_1
-);
+const g = graph.createNewEmptyJoint({ x: 200, y: -50 }, east, 0);
+const h = graph.createNewEmptyJoint({ x: 300, y: -50 }, east, 1);
 graph.connectJoints(g, h, [{ x: 250, y: -50 }], GAUGE);
 
 // Styles, written the way banana's renderer stamped them onto segments.
@@ -90,7 +81,7 @@ createIslandStation(graph, stationManager, {
     position: { x: 0, y: 200 },
     direction: east,
     length: 120,
-    elevation: ELEVATION.GROUND,
+    elevation: 0,
     name: 'Island',
 });
 
@@ -98,7 +89,7 @@ const bcNumber = segmentBetween(graph, b, c);
 const riverside = stationManager.createStation({
     name: 'Riverside',
     position: { x: 150, y: 10 },
-    elevation: ELEVATION.GROUND,
+    elevation: 0,
     platforms: [],
     trackSegments: [bcNumber],
     joints: [],

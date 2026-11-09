@@ -6,7 +6,6 @@ import type {
     StationPlacementPreview,
 } from '../src/station-placement/preview.js';
 import type { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 /** Window coordinates are world coordinates in these tests. */
 export const identity = (position: Point) => ({ ...position });
@@ -64,7 +63,7 @@ export class RecordingPreview
 export function layTrack(
     graph: TrackGraph,
     points: Point[],
-    elevation: ELEVATION = ELEVATION.GROUND
+    elevation: number = 0
 ): { joints: number[]; segments: number[] } {
     const joints = points.map(point =>
         graph.createNewEmptyJoint(point, { x: 1, y: 0 }, elevation)
@@ -87,7 +86,7 @@ export function bareStation(position: Point) {
     return {
         name: 'Station',
         position,
-        elevation: ELEVATION.GROUND,
+        elevation: 0,
         platforms: [],
         trackSegments: [],
         joints: [],

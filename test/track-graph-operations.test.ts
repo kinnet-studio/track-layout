@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
 import { type SegmentSplitInfo, TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import { layLine } from './track-helpers.js';
 
 const EAST = { x: 1, y: 0 };
@@ -114,16 +113,8 @@ describe('TrackGraph.insertJointIntoTrackSegmentUsingTrackNumber', () => {
 
     it('refuses to split a sloped segment', () => {
         const graph = new TrackGraph();
-        const a = graph.createNewEmptyJoint(
-            { x: 0, y: 0 },
-            EAST,
-            ELEVATION.GROUND
-        );
-        const b = graph.createNewEmptyJoint(
-            { x: 100, y: 0 },
-            EAST,
-            ELEVATION.ABOVE_1
-        );
+        const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, EAST, 0);
+        const b = graph.createNewEmptyJoint({ x: 100, y: 0 }, EAST, 10);
         graph.connectJoints(a, b, [{ x: 50, y: 0 }]);
         const ab = graph.getJoint(a)!.connections.get(b)!;
         let splits = 0;

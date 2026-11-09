@@ -11,10 +11,9 @@ import type {
     BrandNewJoint,
     ExtendingTrackJoint,
 } from '../src/editing/types.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 function brandNew(x: number, y: number): BrandNewJoint {
-    return { type: 'new', position: { x, y }, elevation: ELEVATION.GROUND };
+    return { type: 'new', position: { x, y }, elevation: 0 };
 }
 
 /** A dead-end joint at (x, y) whose track continues along `tangent`. */
@@ -22,7 +21,7 @@ function extending(x: number, y: number, tangent: Point): ExtendingTrackJoint {
     return {
         type: 'extendingTrack',
         position: { x, y },
-        elevation: ELEVATION.GROUND,
+        elevation: 0,
         constraint: {
             hitType: 'joint',
             jointNumber: 0,

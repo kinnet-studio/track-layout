@@ -4,7 +4,6 @@ import { describe, expect, it, spyOn } from 'bun:test';
 import { CurveCreationEngine } from '../src/editing/curve-engine.js';
 import type { DeletionHighlightState } from '../src/editing/preview-types.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 
 /** An engine whose window coordinates are world coordinates. */
 function setup() {
@@ -132,7 +131,7 @@ describe('CurveCreationEngine refused commits', () => {
 
     it('refuses a sloped branch', () => {
         const { graph, engine } = withStraightTrack();
-        engine.setCurrentJointElevation(ELEVATION.ABOVE_1);
+        engine.setCurrentJointElevation(10);
         expect(lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 })).toBeNull();
         expect(counts(graph)).toEqual({ segments: 1, joints: 2 });
     });
@@ -194,22 +193,18 @@ describe('CurveCreationEngine refusal reasons', () => {
 
     it('says slopedBranch when a branch would change elevation', () => {
         const { engine } = withStraightTrack();
-        engine.setCurrentJointElevation(ELEVATION.ABOVE_1);
+        engine.setCurrentJointElevation(10);
         lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 });
         expect(engine.lastCurveRefusal).toBe('slopedBranch');
     });
 
     it('says slopedBranch when branching off a sloped segment', () => {
         const { graph, engine } = setup();
-        const a = graph.createNewEmptyJoint(
-            { x: 0, y: 0 },
-            { x: 1, y: 0 },
-            ELEVATION.GROUND
-        );
+        const a = graph.createNewEmptyJoint({ x: 0, y: 0 }, { x: 1, y: 0 }, 0);
         const b = graph.createNewEmptyJoint(
             { x: 100, y: 0 },
             { x: 1, y: 0 },
-            ELEVATION.ABOVE_1
+            10
         );
         graph.connectJoints(a, b, [{ x: 50, y: 0 }]);
         lay(engine, { x: 50, y: 0.2 }, { x: 80, y: 40 });
@@ -346,16 +341,16 @@ describe('CurveCreationEngine events', () => {
     it('reports tension and elevation changes', () => {
         const { engine } = setup();
         const tensions: number[] = [];
-        const elevations: (ELEVATION | null)[] = [];
+        const elevations: (number | null)[] = [];
         engine.onTensionChange(t => tensions.push(t));
         engine.onElevationChange(e => elevations.push(e));
 
         engine.bumpTension();
-        engine.setCurrentJointElevation(ELEVATION.ABOVE_1);
+        engine.setCurrentJointElevation(10);
 
         expect(tensions).toEqual([1.1]);
         expect(engine.currentTension).toBe(1.1);
-        expect(elevations).toEqual([ELEVATION.ABOVE_1]);
+        expect(elevations).toEqual([10]);
     });
 });
 

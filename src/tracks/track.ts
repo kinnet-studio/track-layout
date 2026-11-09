@@ -12,7 +12,7 @@ import {
     sameDirection,
 } from '@ue-too/math';
 
-import { LEVEL_HEIGHT } from './constants.js';
+import { roundHeight } from './heights.js';
 import {
     type SegmentStyle,
     type SegmentStyleChange,
@@ -22,7 +22,6 @@ import {
 import { TrackCurveManager } from './trackcurve-manager.js';
 import { TrackJointManager } from './trackjoint-manager.js';
 import {
-    ELEVATION,
     ProjectionInfo,
     ProjectionJointResult,
     ProjectionResult,
@@ -354,7 +353,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const newJointNumber = this._jointManager.createJoint(newJoint);
@@ -553,7 +552,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const newJointNumber = this._jointManager.createJoint(newTrackJoint);
@@ -592,7 +591,7 @@ export class TrackGraph {
     createNewEmptyJoint(
         position: Point,
         tangent: Point,
-        elevation: ELEVATION = ELEVATION.GROUND
+        elevation: number = 0
     ): number {
         const newJoint: TrackJointWithElevation = {
             position,
@@ -602,7 +601,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation,
+            elevation: roundHeight(elevation),
         };
         const newJointNumber = this._jointManager.createJoint(newJoint);
         return newJointNumber;
@@ -630,7 +629,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const endJoint: TrackJointWithElevation = {
@@ -641,7 +640,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         const startJointNumber = this._jointManager.createJoint(startJoint);
@@ -787,7 +786,7 @@ export class TrackGraph {
                 tangent: new Set<number>(),
                 reverseTangent: new Set<number>(),
             },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         };
 
         newTrackJoint.direction.reverseTangent.add(startJointNumber);
@@ -1400,7 +1399,7 @@ export class TrackGraph {
                     tangent: new Set(joint.direction.tangent),
                     reverseTangent: new Set(joint.direction.reverseTangent),
                 },
-                elevation: joint.elevation,
+                elevation: roundHeight(joint.elevation),
             });
         }
 

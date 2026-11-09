@@ -4,7 +4,6 @@ import type { MeshSimple } from 'pixi.js';
 import { TrackRenderSystem } from '../src/pixi/track-render-system.js';
 import type { SegmentStyle } from '../src/tracks/segment-style.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import {
     RecordingLayerHost,
     camera,
@@ -30,7 +29,7 @@ function restyled(before: Partial<SegmentStyle>, patch: Partial<SegmentStyle>) {
             { x: 0, y: 0 },
             { x: 100, y: 0 },
         ],
-        ELEVATION.ABOVE_1
+        10
     );
     graph.setNewSegmentStyle(patch);
     layTrack(
@@ -39,7 +38,7 @@ function restyled(before: Partial<SegmentStyle>, patch: Partial<SegmentStyle>) {
             { x: 0, y: 50 },
             { x: 100, y: 50 },
         ],
-        ELEVATION.ABOVE_1
+        10
     );
     const pieces = (segment: number) => {
         const key = drawKey(segment);
@@ -146,27 +145,11 @@ describe('restyling a laid segment', () => {
         // the model splits segment 1's draw data at the crossing.
         const east = { x: 1, y: 0 };
         const south = { x: 0, y: 1 };
-        const west0 = graph.createNewEmptyJoint(
-            { x: 0, y: 0 },
-            east,
-            ELEVATION.GROUND
-        );
-        const east0 = graph.createNewEmptyJoint(
-            { x: 100, y: 0 },
-            east,
-            ELEVATION.GROUND
-        );
+        const west0 = graph.createNewEmptyJoint({ x: 0, y: 0 }, east, 0);
+        const east0 = graph.createNewEmptyJoint({ x: 100, y: 0 }, east, 0);
         graph.connectJoints(west0, east0, [{ x: 50, y: 0 }]);
-        const north1 = graph.createNewEmptyJoint(
-            { x: 50, y: -50 },
-            south,
-            ELEVATION.GROUND
-        );
-        const south1 = graph.createNewEmptyJoint(
-            { x: 50, y: 50 },
-            south,
-            ELEVATION.ABOVE_1
-        );
+        const north1 = graph.createNewEmptyJoint({ x: 50, y: -50 }, south, 0);
+        const south1 = graph.createNewEmptyJoint({ x: 50, y: 50 }, south, 10);
         graph.connectJoints(north1, south1, [{ x: 50, y: 0 }]);
 
         const keys = graph.trackCurveManager.persistedDrawData

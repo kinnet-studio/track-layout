@@ -11,7 +11,6 @@ import { computePlatformOffset } from '../src/stations/platform-offset.js';
 import { StationManager } from '../src/stations/station-manager.js';
 import { TrackAlignedPlatformManager } from '../src/stations/track-aligned-platform-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import {
     RecordingPreview,
     bareStation,
@@ -23,7 +22,7 @@ import {
  * Two parallel 0–100 tracks, A along y = 0 and B along y = 20 (B optionally
  * raised), a bare station between them, and the dual-spine machine started.
  */
-function setup(trackBElevation: ELEVATION = ELEVATION.GROUND) {
+function setup(trackBElevation: number = 0) {
     const graph = new TrackGraph();
     const trackA = layTrack(graph, [
         { x: 0, y: 0 },
@@ -196,7 +195,7 @@ describe('dual-spine placement: creating a platform pair', () => {
 
 describe('dual-spine placement: refusals', () => {
     it('refuses spine B on a track at another elevation', () => {
-        const { machine, hints } = setup(ELEVATION.ABOVE_1);
+        const { machine, hints } = setup(10);
         click(machine, { x: 10, y: 3 });
         click(machine, { x: 90, y: 3 });
         click(machine, { x: 10, y: 17 });

@@ -9,7 +9,6 @@ import type { Point } from '@ue-too/math';
 import { PointCal } from '@ue-too/math';
 
 import type { TrackGraph } from '../index.js';
-import { ELEVATION } from '../index.js';
 import { createIslandStation, defaultIslandLayout } from '../index.js';
 import type { StationManager } from '../index.js';
 import type { StationPlacementPreview } from './preview.js';
@@ -125,7 +124,7 @@ export class StationPlacementEngine implements StationPlacementContext {
             position: center,
             direction,
             length: dist,
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
             gauge: this._getGauge(),
         });
     }

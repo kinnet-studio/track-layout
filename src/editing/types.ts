@@ -1,7 +1,6 @@
 import { Point } from '@ue-too/math';
 
 import {
-    ELEVATION,
     FlatElevation,
     ProjectionCurveResult,
     ProjectionEdgeResult,
@@ -22,7 +21,7 @@ export type BrandNewJoint = {
 
 export type BaseJoint = {
     position: Point;
-    elevation: ELEVATION;
+    elevation: number;
 };
 
 export type ConstrainedNewJoint = {

@@ -8,7 +8,6 @@ import {
 } from '../src/tracks/segment-style.js';
 import { type SegmentSplitInfo, TrackGraph } from '../src/tracks/track.js';
 import {
-    ELEVATION,
     type SerializedTrackData,
     validateSerializedTrackData,
 } from '../src/tracks/types.js';
@@ -119,8 +118,8 @@ describe('new segment style', () => {
                 { x: 50, y: 0 },
                 { x: 100, y: 0 },
             ]),
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
         expect(preview.length).toBeGreaterThan(0);
         for (const { drawData } of preview) {

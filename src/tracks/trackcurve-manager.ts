@@ -8,7 +8,7 @@ import { Point, PointCal } from '@ue-too/math';
 
 import { GenericEntityManager } from '../shared/entity-manager.js';
 import { RTree, Rectangle } from '../shared/r-tree.js';
-import { LEVEL_HEIGHT } from './constants.js';
+import { roundHeight } from './heights.js';
 import {
     DEFAULT_SEGMENT_STYLE,
     type SegmentStyle,
@@ -21,7 +21,6 @@ import {
     withStyleDefaults,
 } from './segment-style.js';
 import {
-    ELEVATION,
     ProjectionInfo,
     SerializedTrackSegment,
     TrackSegmentDrawData,
@@ -609,12 +608,8 @@ export class TrackCurveManager {
                         const elevation = curveIsSloped
                             ? getElevationAtT(res.tVal, {
                                   elevation: {
-                                      from:
-                                          trackSegment.elevation.from *
-                                          LEVEL_HEIGHT,
-                                      to:
-                                          trackSegment.elevation.to *
-                                          LEVEL_HEIGHT,
+                                      from: trackSegment.elevation.from,
+                                      to: trackSegment.elevation.to,
                                   },
                               })
                             : trackSegment.elevation.from;
@@ -678,12 +673,8 @@ export class TrackCurveManager {
                         const elevation = curveIsSloped
                             ? getElevationAtT(res.tVal, {
                                   elevation: {
-                                      from:
-                                          trackSegment.elevation.from *
-                                          LEVEL_HEIGHT,
-                                      to:
-                                          trackSegment.elevation.to *
-                                          LEVEL_HEIGHT,
+                                      from: trackSegment.elevation.from,
+                                      to: trackSegment.elevation.to,
                                   },
                               })
                             : trackSegment.elevation.from;
@@ -750,10 +741,8 @@ export class TrackCurveManager {
                     const elevation = curveIsSloped
                         ? getElevationAtT(res.tVal, {
                               elevation: {
-                                  from:
-                                      trackSegment.elevation.from *
-                                      LEVEL_HEIGHT,
-                                  to: trackSegment.elevation.to * LEVEL_HEIGHT,
+                                  from: trackSegment.elevation.from,
+                                  to: trackSegment.elevation.to,
                               },
                           })
                         : trackSegment.elevation.from;
@@ -780,8 +769,8 @@ export class TrackCurveManager {
         curve: BCurve,
         t0Joint: number,
         t1Joint: number,
-        t0Elevation: ELEVATION,
-        t1Elevation: ELEVATION,
+        t0Elevation: number,
+        t1Elevation: number,
         gauge: number = 1.067,
         excludeSegmentsForCollisionCheck: Set<number> = new Set(),
         /** Style for the new segment; defaults to the new-segment style. Splits pass the parent's style. */
@@ -789,6 +778,8 @@ export class TrackCurveManager {
             this._newSegmentStyle
         )
     ): number {
+        t0Elevation = roundHeight(t0Elevation);
+        t1Elevation = roundHeight(t1Elevation);
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
         const aabb = curve.AABB;
@@ -877,8 +868,8 @@ export class TrackCurveManager {
             splits.push({
                 curve: curve,
                 elevation: {
-                    from: t0Elevation * LEVEL_HEIGHT,
-                    to: t1Elevation * LEVEL_HEIGHT,
+                    from: t0Elevation,
+                    to: t1Elevation,
                 },
                 tValInterval: { start: 0, end: 1 },
             });
@@ -887,14 +878,14 @@ export class TrackCurveManager {
                 const [startingCurve, _] = curve.splitIntoCurves(insertionT[0]);
                 const startElevation = getElevationAtT(startT, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(insertionT[0], {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -910,14 +901,14 @@ export class TrackCurveManager {
                 const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
                 const startElevation = getElevationAtT(tVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(nextTVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -935,15 +926,15 @@ export class TrackCurveManager {
                     insertionT[insertionT.length - 1],
                     {
                         elevation: {
-                            from: t0Elevation * LEVEL_HEIGHT,
-                            to: t1Elevation * LEVEL_HEIGHT,
+                            from: t0Elevation,
+                            to: t1Elevation,
                         },
                     }
                 );
                 const endElevation = getElevationAtT(1, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1065,8 +1056,8 @@ export class TrackCurveManager {
 
     getPreviewDrawData(
         curve: BCurve,
-        t0Elevation: ELEVATION,
-        t1Elevation: ELEVATION,
+        t0Elevation: number,
+        t1Elevation: number,
         gauge: number = 1.067,
         excludeSegmentsForCollisionCheck: Set<number> = new Set()
     ): {
@@ -1076,6 +1067,8 @@ export class TrackCurveManager {
             negativeOffsets: Point[];
         };
     }[] {
+        t0Elevation = roundHeight(t0Elevation);
+        t1Elevation = roundHeight(t1Elevation);
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
         const aabb = curve.AABB;
@@ -1164,8 +1157,8 @@ export class TrackCurveManager {
             splits.push({
                 curve: curve,
                 elevation: {
-                    from: t0Elevation * LEVEL_HEIGHT,
-                    to: t1Elevation * LEVEL_HEIGHT,
+                    from: t0Elevation,
+                    to: t1Elevation,
                 },
                 tValInterval: { start: 0, end: 1 },
             });
@@ -1174,14 +1167,14 @@ export class TrackCurveManager {
                 const [startingCurve, _] = curve.splitIntoCurves(insertionT[0]);
                 const startElevation = getElevationAtT(startT, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(insertionT[0], {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1197,14 +1190,14 @@ export class TrackCurveManager {
                 const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
                 const startElevation = getElevationAtT(tVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(nextTVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1222,15 +1215,15 @@ export class TrackCurveManager {
                     insertionT[insertionT.length - 1],
                     {
                         elevation: {
-                            from: t0Elevation * LEVEL_HEIGHT,
-                            to: t1Elevation * LEVEL_HEIGHT,
+                            from: t0Elevation,
+                            to: t1Elevation,
                         },
                     }
                 );
                 const endElevation = getElevationAtT(1, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1400,13 +1393,15 @@ export class TrackCurveManager {
         curve: BCurve,
         t0Joint: number,
         t1Joint: number,
-        t0Elevation: ELEVATION,
-        t1Elevation: ELEVATION,
+        t0Elevation: number,
+        t1Elevation: number,
         gauge: number,
         splitTValues: number[],
         /** Saved style; missing fields get the defaults. */
         style: SegmentStyleFields = {}
     ): void {
+        t0Elevation = roundHeight(t0Elevation);
+        t1Elevation = roundHeight(t1Elevation);
         const experimentPositiveOffsets = offset2(curve, gauge / 2);
         const experimentNegativeOffsets = offset2(curve, -gauge / 2);
         const aabb = curve.AABB;
@@ -1445,8 +1440,8 @@ export class TrackCurveManager {
             splits.push({
                 curve: curve,
                 elevation: {
-                    from: t0Elevation * LEVEL_HEIGHT,
-                    to: t1Elevation * LEVEL_HEIGHT,
+                    from: t0Elevation,
+                    to: t1Elevation,
                 },
                 tValInterval: { start: 0, end: 1 },
             });
@@ -1457,14 +1452,14 @@ export class TrackCurveManager {
                 );
                 const startElevation = getElevationAtT(0, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(splitTValues[0], {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1480,14 +1475,14 @@ export class TrackCurveManager {
                 const [_, secondCurve] = curve.splitIn3Curves(tVal, nextTVal);
                 const startElevation = getElevationAtT(tVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 const endElevation = getElevationAtT(nextTVal, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({
@@ -1505,15 +1500,15 @@ export class TrackCurveManager {
                     splitTValues[splitTValues.length - 1],
                     {
                         elevation: {
-                            from: t0Elevation * LEVEL_HEIGHT,
-                            to: t1Elevation * LEVEL_HEIGHT,
+                            from: t0Elevation,
+                            to: t1Elevation,
                         },
                     }
                 );
                 const endElevation = getElevationAtT(1, {
                     elevation: {
-                        from: t0Elevation * LEVEL_HEIGHT,
-                        to: t1Elevation * LEVEL_HEIGHT,
+                        from: t0Elevation,
+                        to: t1Elevation,
                     },
                 });
                 splits.push({

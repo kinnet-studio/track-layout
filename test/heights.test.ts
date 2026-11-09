@@ -10,7 +10,6 @@ import type {
     SerializedTrackJoint,
     SerializedTrackSegment,
 } from '../src/tracks/types.js';
-import type { ELEVATION } from '../src/tracks/types.js';
 
 function joint(jointNumber: number, elevation: number): SerializedTrackJoint {
     return {
@@ -19,7 +18,7 @@ function joint(jointNumber: number, elevation: number): SerializedTrackJoint {
         connections: [],
         tangent: { x: 1, y: 0 },
         direction: { tangent: [], reverseTangent: [] },
-        elevation: elevation as ELEVATION,
+        elevation: elevation,
     };
 }
 
@@ -39,7 +38,7 @@ function segment(
         ],
         t0Joint,
         t1Joint,
-        elevation: { from: from as ELEVATION, to: to as ELEVATION },
+        elevation: { from: from, to: to },
         gauge: 1.067,
         splits,
     };
@@ -82,10 +81,8 @@ describe('levelsToMetres', () => {
         };
         const stations = [{ elevation: 2, name: 'A', depotOnly: true }];
         const out = levelsToMetres({ track, stations });
-        expect(out.track.joints.map(j => j.elevation as number)).toEqual([
-            10, -30,
-        ]);
-        expect(out.track.segments[0].elevation as unknown).toEqual({
+        expect(out.track.joints.map(j => j.elevation)).toEqual([10, -30]);
+        expect(out.track.segments[0].elevation).toEqual({
             from: 10,
             to: -30,
         });

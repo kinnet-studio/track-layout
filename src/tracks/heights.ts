@@ -62,20 +62,18 @@ export function levelsToMetres<S extends { elevation: number }>(data: {
     track: SerializedTrackData;
     stations: readonly S[];
 }): { track: SerializedTrackData; stations: S[] } {
-    // The serialized elevation types are still the ELEVATION enum here.
-    const convert = (level: number) => levelToMetres(level) as never;
     return {
         track: {
             ...data.track,
             joints: data.track.joints.map(joint => ({
                 ...joint,
-                elevation: convert(joint.elevation),
+                elevation: levelToMetres(joint.elevation),
             })),
             segments: data.track.segments.map(segment => ({
                 ...segment,
                 elevation: {
-                    from: convert(segment.elevation.from),
-                    to: convert(segment.elevation.to),
+                    from: levelToMetres(segment.elevation.from),
+                    to: levelToMetres(segment.elevation.to),
                 },
                 splits: [...segment.splits],
             })),

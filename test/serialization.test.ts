@@ -5,7 +5,7 @@ import { GenericEntityManager } from '../src/shared/entity-manager.js';
 import { TrackGraph } from '../src/tracks/track.js';
 import { TrackCurveManager } from '../src/tracks/trackcurve-manager.js';
 import { TrackJointManager } from '../src/tracks/trackjoint-manager.js';
-import { ELEVATION, validateSerializedTrackData } from '../src/tracks/types.js';
+import { validateSerializedTrackData } from '../src/tracks/types.js';
 import type {
     SerializedTrackJoint,
     SerializedTrackSegment,
@@ -124,7 +124,7 @@ describe('TrackJointManager serialization', () => {
     function makeJoint(
         x: number,
         y: number,
-        elevation: ELEVATION = ELEVATION.GROUND,
+        elevation: number = 0,
         connections: [number, number][] = [],
         tangentDir: number[] = [],
         reverseTangentDir: number[] = []
@@ -152,7 +152,7 @@ describe('TrackJointManager serialization', () => {
 
     it('should round-trip a single joint', () => {
         const manager = new TrackJointManager(5);
-        const joint = makeJoint(10, 20, ELEVATION.GROUND);
+        const joint = makeJoint(10, 20, 0);
         const id = manager.createJoint(joint);
 
         const serialized = manager.serialize();
@@ -161,7 +161,7 @@ describe('TrackJointManager serialization', () => {
         const restoredJoint = restored.getJoint(id);
         expect(restoredJoint).not.toBeNull();
         expect(restoredJoint!.position).toEqual({ x: 10, y: 20 });
-        expect(restoredJoint!.elevation).toBe(ELEVATION.GROUND);
+        expect(restoredJoint!.elevation).toBe(0);
     });
 
     it('should preserve joint numbers across serialize/deserialize', () => {
@@ -187,7 +187,7 @@ describe('TrackJointManager serialization', () => {
 
     it('should preserve Map connections through serialization', () => {
         const manager = new TrackJointManager(5);
-        const joint = makeJoint(0, 0, ELEVATION.GROUND, [
+        const joint = makeJoint(0, 0, 0, [
             [1, 5],
             [2, 7],
         ]);
@@ -205,7 +205,7 @@ describe('TrackJointManager serialization', () => {
 
     it('should preserve Set directions through serialization', () => {
         const manager = new TrackJointManager(5);
-        const joint = makeJoint(0, 0, ELEVATION.GROUND, [], [3, 5], [4, 6]);
+        const joint = makeJoint(0, 0, 0, [], [3, 5], [4, 6]);
         const id = manager.createJoint(joint);
 
         const serialized = manager.serialize();
@@ -220,9 +220,7 @@ describe('TrackJointManager serialization', () => {
 
     it('should produce valid JSON from serialize()', () => {
         const manager = new TrackJointManager(5);
-        manager.createJoint(
-            makeJoint(1, 2, ELEVATION.ABOVE_1, [[0, 3]], [1], [2])
-        );
+        manager.createJoint(makeJoint(1, 2, 10, [[0, 3]], [1], [2]));
 
         const serialized = manager.serialize();
         const json = JSON.stringify(serialized);
@@ -231,17 +229,13 @@ describe('TrackJointManager serialization', () => {
         const restored = TrackJointManager.deserialize(parsed);
         const joint = restored.getJoint(0)!;
         expect(joint.position).toEqual({ x: 1, y: 2 });
-        expect(joint.elevation).toBe(ELEVATION.ABOVE_1);
+        expect(joint.elevation).toBe(10);
         expect(joint.connections.get(0)).toBe(3);
     });
 
     it('should preserve elevation values', () => {
         const manager = new TrackJointManager(10);
-        const elevations = [
-            ELEVATION.SUB_2,
-            ELEVATION.GROUND,
-            ELEVATION.ABOVE_3,
-        ];
+        const elevations = [-20, 0, 30];
         const ids: number[] = [];
         for (const elev of elevations) {
             ids.push(manager.createJoint(makeJoint(0, 0, elev)));
@@ -302,13 +296,7 @@ describe('TrackCurveManager serialization', () => {
     it('should round-trip a single track segment', () => {
         const manager = new TrackCurveManager(5);
         const curve = makeStraightCurve(0, 0, 100, 0);
-        const segId = manager.createCurveWithJoints(
-            curve,
-            0,
-            1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
-        );
+        const segId = manager.createCurveWithJoints(curve, 0, 1, 0, 0);
 
         const serialized = manager.serialize();
         expect(serialized.length).toBe(1);
@@ -320,8 +308,8 @@ describe('TrackCurveManager serialization', () => {
         expect(restoredSegment!.t0Joint).toBe(0);
         expect(restoredSegment!.t1Joint).toBe(1);
         expect(restoredSegment!.elevation).toEqual({
-            from: ELEVATION.GROUND,
-            to: ELEVATION.GROUND,
+            from: 0,
+            to: 0,
         });
     });
 
@@ -331,22 +319,22 @@ describe('TrackCurveManager serialization', () => {
             makeStraightCurve(0, 0, 100, 0),
             0,
             1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
         const seg1 = manager.createCurveWithJoints(
             makeStraightCurve(0, 50, 100, 50),
             2,
             3,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
         const seg2 = manager.createCurveWithJoints(
             makeStraightCurve(0, 100, 100, 100),
             4,
             5,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
         manager.destroyCurve(seg1);
 
@@ -369,13 +357,7 @@ describe('TrackCurveManager serialization', () => {
             { x: 100, y: 0 },
         ];
         const curve = new BCurve(originalCps);
-        const segId = manager.createCurveWithJoints(
-            curve,
-            0,
-            1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
-        );
+        const segId = manager.createCurveWithJoints(curve, 0, 1, 0, 0);
 
         const serialized = manager.serialize();
         const restored = TrackCurveManager.deserialize(serialized);
@@ -395,8 +377,8 @@ describe('TrackCurveManager serialization', () => {
             makeStraightCurve(0, 0, 50, 0),
             7,
             13,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
 
         const serialized = manager.serialize();
@@ -412,15 +394,15 @@ describe('TrackCurveManager serialization', () => {
             makeStraightCurve(0, 0, 100, 0),
             0,
             1,
-            ELEVATION.GROUND,
-            ELEVATION.ABOVE_2
+            0,
+            20
         );
 
         const serialized = manager.serialize();
         const restored = TrackCurveManager.deserialize(serialized);
         const seg = restored.getTrackSegmentWithJoints(segId)!;
-        expect(seg.elevation.from).toBe(ELEVATION.GROUND);
-        expect(seg.elevation.to).toBe(ELEVATION.ABOVE_2);
+        expect(seg.elevation.from).toBe(0);
+        expect(seg.elevation.to).toBe(20);
     });
 
     it('should preserve gauge', () => {
@@ -430,8 +412,8 @@ describe('TrackCurveManager serialization', () => {
             makeStraightCurve(0, 0, 100, 0),
             0,
             1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND,
+            0,
+            0,
             customGauge
         );
 
@@ -448,8 +430,8 @@ describe('TrackCurveManager serialization', () => {
             makeCubicCurve(0, 0, 20, 40, 80, 40, 100, 0),
             0,
             1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
 
         const serialized = manager.serialize();
@@ -463,13 +445,7 @@ describe('TrackCurveManager serialization', () => {
     it('should rebuild RTree so projectOnCurve works after deserialization', () => {
         const manager = new TrackCurveManager(5);
         const curve = makeStraightCurve(0, 0, 100, 0);
-        const segId = manager.createCurveWithJoints(
-            curve,
-            0,
-            1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
-        );
+        const segId = manager.createCurveWithJoints(curve, 0, 1, 0, 0);
 
         const projection = manager.projectOnCurve({ x: 50, y: 0 });
         expect(projection).not.toBeNull();
@@ -493,14 +469,14 @@ describe('Cross-reference preservation', () => {
             connections: new Map(),
             tangent: { x: 1, y: 0 },
             direction: { tangent: new Set(), reverseTangent: new Set() },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         });
         const j1 = jointManager.createJoint({
             position: { x: 100, y: 0 },
             connections: new Map(),
             tangent: { x: 1, y: 0 },
             direction: { tangent: new Set(), reverseTangent: new Set() },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         });
 
         const curve = new BCurve([
@@ -508,13 +484,7 @@ describe('Cross-reference preservation', () => {
             { x: 50, y: 0 },
             { x: 100, y: 0 },
         ]);
-        const segId = curveManager.createCurveWithJoints(
-            curve,
-            j0,
-            j1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
-        );
+        const segId = curveManager.createCurveWithJoints(curve, j0, j1, 0, 0);
 
         const j0Data = jointManager.getJoint(j0)!;
         j0Data.connections.set(j1, segId);
@@ -557,21 +527,21 @@ describe('Cross-reference preservation', () => {
             connections: new Map(),
             tangent: { x: 1, y: 0 },
             direction: { tangent: new Set(), reverseTangent: new Set() },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         });
         const j1 = jointManager.createJoint({
             position: { x: 100, y: 0 },
             connections: new Map(),
             tangent: { x: 1, y: 0 },
             direction: { tangent: new Set(), reverseTangent: new Set() },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         });
         const j2 = jointManager.createJoint({
             position: { x: 100, y: 100 },
             connections: new Map(),
             tangent: { x: 0, y: 1 },
             direction: { tangent: new Set(), reverseTangent: new Set() },
-            elevation: ELEVATION.GROUND,
+            elevation: 0,
         });
 
         const seg0 = curveManager.createCurveWithJoints(
@@ -582,8 +552,8 @@ describe('Cross-reference preservation', () => {
             ]),
             j0,
             j1,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
         const seg1 = curveManager.createCurveWithJoints(
             new BCurve([
@@ -593,8 +563,8 @@ describe('Cross-reference preservation', () => {
             ]),
             j1,
             j2,
-            ELEVATION.GROUND,
-            ELEVATION.GROUND
+            0,
+            0
         );
 
         const j1Data = jointManager.getJoint(j1)!;
@@ -860,7 +830,7 @@ describe('TrackGraph.serialize / loadFromSerializedData', () => {
                     connections: [[1, 0]] as [number, number][],
                     tangent: { x: 1, y: 0 },
                     direction: { tangent: [1], reverseTangent: [] },
-                    elevation: ELEVATION.GROUND,
+                    elevation: 0,
                 },
                 {
                     jointNumber: 1,
@@ -868,7 +838,7 @@ describe('TrackGraph.serialize / loadFromSerializedData', () => {
                     connections: [[0, 0]] as [number, number][],
                     tangent: { x: 1, y: 0 },
                     direction: { tangent: [], reverseTangent: [0] },
-                    elevation: ELEVATION.GROUND,
+                    elevation: 0,
                 },
             ],
             segments: [
@@ -881,7 +851,7 @@ describe('TrackGraph.serialize / loadFromSerializedData', () => {
                     ],
                     t0Joint: 0,
                     t1Joint: 1,
-                    elevation: { from: ELEVATION.GROUND, to: ELEVATION.GROUND },
+                    elevation: { from: 0, to: 0 },
                     gauge: 1.067,
                     splits: [],
                 },

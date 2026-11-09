@@ -19,7 +19,7 @@ describe('package entry', () => {
             'validateSerializedTrackData',
             'DEFAULT_SEGMENT_STYLE',
             'defaultYieldToFrame',
-            'ELEVATION',
+            'levelsToMetres',
         ]) {
             expect(trackLayout).toHaveProperty(name);
         }

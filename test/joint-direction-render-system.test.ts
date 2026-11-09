@@ -4,7 +4,6 @@ import type { Container, Graphics } from 'pixi.js';
 import { JointDirectionRenderSystem } from '../src/pixi/joint-direction-render-system.js';
 import { JointDirectionPreferenceMap } from '../src/tracks/joint-direction-preference-map.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import { RecordingLayerHost, camera, zoomTo } from './pixi-helpers.js';
 
 /** Joint 1 at (100, 0) is a switch: it branches to joints 2 and 3. */
@@ -16,9 +15,7 @@ function scene() {
         { x: 100, y: 0 },
         { x: 200, y: 0 },
         { x: 200, y: 40 },
-    ].map(position =>
-        graph.createNewEmptyJoint(position, { x: 1, y: 0 }, ELEVATION.GROUND)
-    );
+    ].map(position => graph.createNewEmptyJoint(position, { x: 1, y: 0 }, 0));
     graph.connectJoints(joints[0]!, joints[1]!, [{ x: 50, y: 0 }]);
     graph.connectJoints(joints[1]!, joints[2]!, [{ x: 150, y: 0 }]);
     graph.connectJoints(joints[1]!, joints[3]!, [{ x: 150, y: 0 }]);

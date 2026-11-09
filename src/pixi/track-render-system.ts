@@ -14,7 +14,6 @@ import type {
     DuplicateHighlightState,
     PreviewDrawData,
 } from '../editing/preview-types.js';
-import { LEVEL_HEIGHT } from '../index.js';
 import { TrackCurveManager } from '../index.js';
 import {
     ProjectionPositiveResult,
@@ -80,14 +79,23 @@ const ELEVATION_GRADIENT_WIDTH = 4;
 const ELEVATION_GRADIENT_HEIGHT = 128;
 
 /** Elevation range of the gradient, in metres: the lowest to the highest band. */
-const ELEVATION_RAW_MIN = DETAILED_BAND_HEIGHTS[0];
-const ELEVATION_RAW_MAX =
+const GRADIENT_MIN_METRES = DETAILED_BAND_HEIGHTS[0];
+const GRADIENT_MAX_METRES =
     DETAILED_BAND_HEIGHTS[DETAILED_BAND_HEIGHTS.length - 1];
 
-/** Map a raw elevation value to a normalised [0, 1] coordinate into the gradient texture. */
-const normalizeElevation = (rawElevation: number): number =>
-    (rawElevation - ELEVATION_RAW_MIN) /
-    (ELEVATION_RAW_MAX - ELEVATION_RAW_MIN);
+/**
+ * Maps a height in metres to a [0, 1] coordinate into the gradient texture.
+ * Heights outside the end bands clamp to 0 or 1.
+ */
+export const normalizeElevation = (metres: number): number =>
+    Math.min(
+        1,
+        Math.max(
+            0,
+            (metres - GRADIENT_MIN_METRES) /
+                (GRADIENT_MAX_METRES - GRADIENT_MIN_METRES)
+        )
+    );
 
 /** Size of the tiny solid-black texture used for shadow meshes. */
 const SHADOW_TEX_SIZE = 4;
@@ -166,8 +174,8 @@ const lineEndsOf = (
 
 /** A segment's heights in metres, at its two ends. */
 const heightsOf = (segment: TrackSegmentWithCollision): LineHeights => ({
-    from: segment.elevation.from * LEVEL_HEIGHT,
-    to: segment.elevation.to * LEVEL_HEIGHT,
+    from: segment.elevation.from,
+    to: segment.elevation.to,
 });
 
 /**
@@ -2475,10 +2483,10 @@ export class TrackRenderSystem {
         const g = new Graphics();
         for (let y = 0; y < ELEVATION_GRADIENT_HEIGHT; y++) {
             const normalizedV = y / (ELEVATION_GRADIENT_HEIGHT - 1);
-            const rawElevation =
-                ELEVATION_RAW_MIN +
-                normalizedV * (ELEVATION_RAW_MAX - ELEVATION_RAW_MIN);
-            const rgb = findElevationColorStop(rawElevation);
+            const metres =
+                GRADIENT_MIN_METRES +
+                normalizedV * (GRADIENT_MAX_METRES - GRADIENT_MIN_METRES);
+            const rgb = findElevationColorStop(metres);
             const color = rgbToHex(rgb);
             g.rect(0, y, ELEVATION_GRADIENT_WIDTH, 1);
             g.fill(color);
@@ -2907,8 +2915,8 @@ export class TrackRenderSystem {
         const simplifiedTrackGraphics = buildBezierLine(trackSegment.curve);
 
         const rawElevation = Math.max(
-            trackSegment.elevation.from * LEVEL_HEIGHT,
-            trackSegment.elevation.to * LEVEL_HEIGHT
+            trackSegment.elevation.from,
+            trackSegment.elevation.to
         );
         const bandIndex =
             this._worldRenderSystem.getElevationBandIndex(rawElevation);
@@ -2935,8 +2943,8 @@ export class TrackRenderSystem {
                 this._terrainData?.getHeight(startPoint.x, startPoint.y) ?? 0;
             const endTerrainH =
                 this._terrainData?.getHeight(endPoint.x, endPoint.y) ?? 0;
-            const startTrackElev = trackSegment.elevation.from * LEVEL_HEIGHT;
-            const endTrackElev = trackSegment.elevation.to * LEVEL_HEIGHT;
+            const startTrackElev = trackSegment.elevation.from;
+            const endTrackElev = trackSegment.elevation.to;
 
             // Track is underground when its elevation is below terrain at that point.
             if (startTrackElev < startTerrainH && endTrackElev < endTerrainH) {
@@ -3099,7 +3107,7 @@ export class TrackRenderSystem {
 
                 // Place shadow one elevation band below the track so terrain
                 // occlusion at the track's own level properly hides it.
-                // e.g. ABOVE_2 track shadow → ABOVE_1 band; hidden by ABOVE_2+ terrain.
+                // e.g. a 20 m track's shadow goes in the 10 m band; hidden by terrain at 20 m or more.
                 const trackBandIndex =
                     this._worldRenderSystem.getElevationBandIndex(
                         Math.max(drawData.elevation.from, drawData.elevation.to)
@@ -3927,8 +3935,14 @@ export const interpolateRgb = (a: Rgb, b: Rgb, t: number): Rgb => ({
     b: a.b + (b.b - a.b) * t,
 });
 
-const findElevationColorStop = (elevation: number): Rgb => {
-    const interval = findElevationInterval(elevation);
+/**
+ * The Detailed colour at a height in metres, blended between band colours.
+ * Heights outside the end bands take the end band's colour.
+ */
+export const findElevationColorStop = (metres: number): Rgb => {
+    const interval = findElevationInterval(
+        Math.min(GRADIENT_MAX_METRES, Math.max(GRADIENT_MIN_METRES, metres))
+    );
     if (interval === null) {
         return { r: 0, g: 0, b: 0 };
     }

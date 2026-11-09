@@ -9,11 +9,8 @@ import { type Point, directionAlignedToTangent } from '@ue-too/math';
 import { PointCal } from '@ue-too/math';
 
 import { TrackGraph } from '../index.js';
-import {
-    ELEVATION,
-    ProjectionPositiveResult,
-    ProjectionResult,
-} from '../index.js';
+import { ProjectionPositiveResult, ProjectionResult } from '../index.js';
+import { HEIGHT_MAX, HEIGHT_MIN, clampHeight } from '../tracks/heights.js';
 import { LayoutContext } from './layout-kmt-state-machine.js';
 import { PreviewCurveCalculator, TENSION_STEP } from './new-joint.js';
 import type {
@@ -42,8 +39,8 @@ export class CurveCreationEngine implements LayoutContext {
         curve: BCurve;
         previewStartAndEndSwitched: boolean;
         elevation: {
-            from: ELEVATION;
-            to: ELEVATION;
+            from: number;
+            to: number;
         };
         gauge: number;
     } | null = null;
@@ -59,9 +56,9 @@ export class CurveCreationEngine implements LayoutContext {
     private _deletionHighlightObservable: Observable<[DeletionHighlightState]> =
         new SynchronousObservable<[DeletionHighlightState]>();
 
-    public _currentJointElevation: ELEVATION | null = null;
-    private _elevationObservable: Observable<[ELEVATION | null]> =
-        new SynchronousObservable<[ELEVATION | null]>();
+    public _currentJointElevation: number | null = null;
+    private _elevationObservable: Observable<[number | null]> =
+        new SynchronousObservable<[number | null]>();
 
     private _previewCurveCalculator: PreviewCurveCalculator =
         new PreviewCurveCalculator();
@@ -131,7 +128,7 @@ export class CurveCreationEngine implements LayoutContext {
         // this.cancelCurrentCurve();
     }
 
-    setCurrentJointElevation(elevation: ELEVATION) {
+    setCurrentJointElevation(elevation: number) {
         if (elevation != this._currentJointElevation) {
             this._elevationObservable.notify(elevation);
         }
@@ -153,16 +150,16 @@ export class CurveCreationEngine implements LayoutContext {
         const currentElevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
-        if (currentElevation >= ELEVATION.ABOVE_3) {
+                : 0;
+        if (currentElevation >= HEIGHT_MAX) {
             return;
         }
-        this._currentJointElevation = currentElevation + 1;
+        this._currentJointElevation = clampHeight(currentElevation + 1);
         this._elevationObservable.notify(this._currentJointElevation);
         if (this._newStartJoint === null) {
             return;
         }
-        this._newStartJoint.elevation = currentElevation + 1;
+        this._newStartJoint.elevation = clampHeight(currentElevation + 1);
         if (this._newEndJoint === null) {
             return;
         }
@@ -180,16 +177,16 @@ export class CurveCreationEngine implements LayoutContext {
         const currentElevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
-        if (currentElevation >= ELEVATION.ABOVE_3) {
+                : 0;
+        if (currentElevation >= HEIGHT_MAX) {
             return;
         }
-        this._currentJointElevation = currentElevation + 1;
+        this._currentJointElevation = clampHeight(currentElevation + 1);
         this._elevationObservable.notify(this._currentJointElevation);
         if (this._newEndJoint === null) {
             return;
         }
-        this._newEndJoint.elevation = currentElevation + 1;
+        this._newEndJoint.elevation = clampHeight(currentElevation + 1);
         if (this._newStartJoint === null) {
             return;
         }
@@ -207,11 +204,11 @@ export class CurveCreationEngine implements LayoutContext {
         const currentElevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
-        if (currentElevation >= ELEVATION.ABOVE_3) {
+                : 0;
+        if (currentElevation >= HEIGHT_MAX) {
             return;
         }
-        this._currentJointElevation = currentElevation + 1;
+        this._currentJointElevation = clampHeight(currentElevation + 1);
         this._elevationObservable.notify(this._currentJointElevation);
     }
 
@@ -226,16 +223,16 @@ export class CurveCreationEngine implements LayoutContext {
         const currentElevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
-        if (currentElevation <= ELEVATION.SUB_3) {
+                : 0;
+        if (currentElevation <= HEIGHT_MIN) {
             return;
         }
-        this._currentJointElevation = currentElevation - 1;
+        this._currentJointElevation = clampHeight(currentElevation - 1);
         this._elevationObservable.notify(this._currentJointElevation);
         if (this._newStartJoint === null) {
             return;
         }
-        this._newStartJoint.elevation = currentElevation - 1;
+        this._newStartJoint.elevation = clampHeight(currentElevation - 1);
         if (this._newEndJoint === null) {
             return;
         }
@@ -253,16 +250,16 @@ export class CurveCreationEngine implements LayoutContext {
         const currentElevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
-        if (currentElevation <= ELEVATION.SUB_3) {
+                : 0;
+        if (currentElevation <= HEIGHT_MIN) {
             return;
         }
-        this._currentJointElevation = currentElevation - 1;
+        this._currentJointElevation = clampHeight(currentElevation - 1);
         this._elevationObservable.notify(this._currentJointElevation);
         if (this._newEndJoint === null) {
             return;
         }
-        this._newEndJoint.elevation = currentElevation - 1;
+        this._newEndJoint.elevation = clampHeight(currentElevation - 1);
         if (this._newStartJoint === null) {
             return;
         }
@@ -280,15 +277,15 @@ export class CurveCreationEngine implements LayoutContext {
         const currentElevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
-        if (currentElevation <= ELEVATION.SUB_3) {
+                : 0;
+        if (currentElevation <= HEIGHT_MIN) {
             return;
         }
-        this._currentJointElevation = currentElevation - 1;
+        this._currentJointElevation = clampHeight(currentElevation - 1);
         this._elevationObservable.notify(this._currentJointElevation);
     }
 
-    onElevationChange(observer: Observer<[ELEVATION | null]>) {
+    onElevationChange(observer: Observer<[number | null]>) {
         this._elevationObservable.subscribe(observer);
     }
 
@@ -338,7 +335,7 @@ export class CurveCreationEngine implements LayoutContext {
         const elevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
+                : 0;
         this._newStartJoint = this.determineNewJointType(
             position,
             res,
@@ -493,7 +490,7 @@ export class CurveCreationEngine implements LayoutContext {
         const elevation =
             this._currentJointElevation != null
                 ? this._currentJointElevation
-                : ELEVATION.GROUND;
+                : 0;
         this._newEndJoint = this.determineNewJointType(
             position,
             res,
@@ -529,8 +526,8 @@ export class CurveCreationEngine implements LayoutContext {
         curve: BCurve;
         previewStartAndEndSwitched: boolean;
         elevation: {
-            from: ELEVATION;
-            to: ELEVATION;
+            from: number;
+            to: number;
         };
     } | null {
         return this._previewCurve;
@@ -920,7 +917,7 @@ export class CurveCreationEngine implements LayoutContext {
     determineNewJointType(
         rawPosition: Point,
         projection: ProjectionResult,
-        elevation: ELEVATION = ELEVATION.GROUND
+        elevation: number = 0
     ): NewJointType {
         if (!projection.hit) {
             return {

@@ -4,7 +4,6 @@ import { PointCal } from '@ue-too/math';
 import { DEFAULT_GAUGE_PRESET } from '../tracks/gauge-presets.js';
 import { segmentFieldsFromStyle } from '../tracks/segment-style.js';
 import type { TrackGraph } from '../tracks/track.js';
-import type { ELEVATION } from '../tracks/types.js';
 import { computePlatformOffset } from './platform-offset.js';
 import type { StationManager } from './station-manager.js';
 import type { Platform, StopPosition } from './types.js';
@@ -41,7 +40,7 @@ export type CreateIslandStationOptions = {
     direction: Point;
     /** Length of the station / platform (meters). */
     length: number;
-    elevation: ELEVATION;
+    elevation: number;
     name?: string;
     gauge?: number;
     /**

@@ -5,6 +5,7 @@ import {
 } from '@ue-too/board';
 
 import { GenericEntityManager } from '../shared/entity-manager.js';
+import { roundHeight } from '../tracks/heights.js';
 import { nextStopPositionId } from './stop-position-utils.js';
 import type {
     SerializedStation,
@@ -70,6 +71,7 @@ export class StationManager {
     createStation(station: Omit<Station, 'id'>): number {
         const id = this._manager.createEntity({
             ...station,
+            elevation: roundHeight(station.elevation),
             id: -1,
         } as Station);
         // Patch the id to match the entity number assigned by the manager.
@@ -91,7 +93,11 @@ export class StationManager {
     }
 
     createStationWithId(id: number, station: Station): void {
-        this._manager.createEntityWithId(id, { ...station, id });
+        this._manager.createEntityWithId(id, {
+            ...station,
+            elevation: roundHeight(station.elevation),
+            id,
+        });
         this._stationAddedObservable.notify(id);
         this._notifyChanged();
     }
@@ -243,7 +249,7 @@ export class StationManager {
                 id: s.id,
                 name: s.name,
                 position: { x: s.position.x, y: s.position.y },
-                elevation: s.elevation,
+                elevation: roundHeight(s.elevation),
                 platforms: s.platforms.map(p => ({
                     id: p.id,
                     track: p.track,

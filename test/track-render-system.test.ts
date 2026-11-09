@@ -11,7 +11,6 @@ import {
 } from '../src/pixi/track-render-system.js';
 import type { TerrainSampler } from '../src/pixi/tunnel-geometry.js';
 import { TrackGraph } from '../src/tracks/track.js';
-import { ELEVATION } from '../src/tracks/types.js';
 import {
     RecordingLayerHost,
     type StrokedLine,
@@ -50,7 +49,7 @@ function scene(options: TrackRenderSystemOptions = {}) {
 }
 
 /** Lays one straight segment from A to B, ramping from `from` to `to`. */
-function layRamp(graph: TrackGraph, from: ELEVATION, to: ELEVATION) {
+function layRamp(graph: TrackGraph, from: number, to: number) {
     const start = graph.createNewEmptyJoint(A, { x: 1, y: 0 }, from);
     const end = graph.createNewEmptyJoint(B, { x: 1, y: 0 }, to);
     graph.connectJoints(start, end, [{ x: 50, y: 0 }]);
@@ -76,11 +75,7 @@ function previewData(
     graph: TrackGraph,
     curve = new BCurve([A, { x: 50, y: 0 }, B])
 ) {
-    return graph.trackCurveManager.getPreviewDrawData(
-        curve,
-        ELEVATION.GROUND,
-        ELEVATION.GROUND
-    );
+    return graph.trackCurveManager.getPreviewDrawData(curve, 0, 0);
 }
 
 describe('getElevationColorRgb', () => {
@@ -112,7 +107,7 @@ describe('TrackRenderSystem: laid track', () => {
     it('draws elevated track in its band and its shadow one level below', () => {
         const { host, graph } = scene();
 
-        layTrack(graph, [A, B], ELEVATION.ABOVE_2);
+        layTrack(graph, [A, B], 20);
 
         expect(host.bandOf(KEY)).toBe(5);
         expect(host.bandOf(`__rail__${KEY}`)).toBe(5);
@@ -122,7 +117,7 @@ describe('TrackRenderSystem: laid track', () => {
     it('draws a ramp in the band of its higher end', () => {
         const { host, graph } = scene();
 
-        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+        layRamp(graph, 0, 10);
 
         expect(host.bandOf(KEY)).toBe(4);
         expect(host.shadowElevationOf(KEY)).toBe(0);
@@ -132,7 +127,7 @@ describe('TrackRenderSystem: laid track', () => {
         const { host, graph } = scene();
         graph.setNewSegmentStyle({ bed: true, electrified: true });
 
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         expect(host.bedElevationOf(KEY)).toBe(10);
         expect(host.sublayerOf(`__catenary__${KEY}`)).toBe('catenary');
@@ -142,7 +137,7 @@ describe('TrackRenderSystem: laid track', () => {
     it('draws no rails or shadows without a texture renderer', () => {
         const { host, graph } = scene({ textureRenderer: null });
 
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         expect(host.bandKeys).toEqual(['__simplified__0', KEY]);
         expect(host.shadowKeys).toEqual([]);
@@ -151,7 +146,7 @@ describe('TrackRenderSystem: laid track', () => {
     it('removes everything a deleted segment registered', () => {
         const { host, graph } = scene();
         graph.setNewSegmentStyle({ bed: true, electrified: true });
-        const { segments } = layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+        const { segments } = layTrack(graph, [A, B, C], 10);
 
         graph.removeTrackSegment(segments[0]!);
 
@@ -168,7 +163,7 @@ describe('TrackRenderSystem: laid track', () => {
 
     it('reports the band of a draw-data piece, or null for an unknown one', () => {
         const { renderer, graph } = scene();
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         expect(
             renderer.getTrackBandIndex({
@@ -189,7 +184,7 @@ describe('TrackRenderSystem: display settings', () => {
     it('shows the simplified track below zoom 5 and the detailed track from 5', async () => {
         const { host, graph, camera } = scene();
         graph.setNewSegmentStyle({ bed: true });
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
         const detailed = () => [
             host.bandItem(KEY)!.visible,
             host.bandItem(`__rail__${KEY}`)!.visible,
@@ -220,7 +215,7 @@ describe('TrackRenderSystem: display settings', () => {
 
     it('moves a level shadow with the sun angle', () => {
         const { host, graph, renderer } = scene();
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
         const shadow = host.shadow(KEY)!;
         const before = { x: shadow.position.x, y: shadow.position.y };
 
@@ -237,7 +232,7 @@ describe('TrackRenderSystem: terrain', () => {
     it('treats missing terrain as flat ground, so track below ground is in a tunnel', () => {
         const { host, graph } = scene();
 
-        layTrack(graph, [A, B], ELEVATION.SUB_1);
+        layTrack(graph, [A, B], -10);
 
         expect(host.sublayerOf(`__tunnel_wall__${KEY}`)).toBe('drawable');
         expect(host.sublayerOf(`__tunnel_ceiling__${KEY}`)).toBe('catenary');
@@ -257,7 +252,7 @@ describe('TrackRenderSystem: terrain', () => {
     it('gives a ramp that crosses the terrain a cutting and a cover', () => {
         const { host, graph } = scene({ terrain: flatTerrain(5) });
 
-        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+        layRamp(graph, 0, 10);
 
         expect(host.sublayerOf(`__cutting__${KEY}`)).toBe('drawable');
         expect(host.sublayerOf(`__cutting_cover__${KEY}`)).toBe('catenary');
@@ -266,7 +261,7 @@ describe('TrackRenderSystem: terrain', () => {
     it('draws no tunnel for track above the terrain', () => {
         const { host, graph } = scene({ terrain: flatTerrain(5) });
 
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         expect(host.bandKeys.filter(key => key.includes('tunnel'))).toEqual([]);
     });
@@ -369,14 +364,14 @@ describe('TrackRenderSystem: cleanup', () => {
             terrain: flatTerrain(5),
         });
         graph.setNewSegmentStyle({ bed: true, electrified: true });
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
-        layRamp(graph, ELEVATION.SUB_1, ELEVATION.GROUND);
+        layTrack(graph, [A, B], 10);
+        layRamp(graph, -10, 0);
         curveCreation.emit(
             'onPreviewDrawDataChange',
             graph.trackCurveManager.getPreviewDrawData(
                 new BCurve([C, { x: 250, y: 0 }, { x: 300, y: 0 }]),
-                ELEVATION.GROUND,
-                ELEVATION.GROUND
+                0,
+                0
             )
         );
         expect(host.bandKeys.length).toBeGreaterThan(0);
@@ -413,9 +408,9 @@ describe('TrackRenderSystem: cleanup', () => {
                 { x: 0, y: 50 },
                 { x: 100, y: 50 },
             ],
-            ELEVATION.SUB_1
+            -10
         );
-        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+        layRamp(graph, 0, 10);
         expect(host.bandKeys).toContain(`__tunnel_wall__${KEY}`);
         expect(host.bandKeys).toContain(`__cutting__${drawKey(1)}`);
 
@@ -430,8 +425,8 @@ describe('TrackRenderSystem: track that exists when it is built', () => {
     /** Lays two elevated, bedded, electrified segments and a ramp into `graph`. */
     function layLayout(graph: TrackGraph) {
         graph.setNewSegmentStyle({ bed: true, electrified: true });
-        layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
-        layRamp(graph, ELEVATION.GROUND, ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B, C], 10);
+        layRamp(graph, 0, 10);
     }
 
     /** A renderer built over a graph that already holds the layout. */
@@ -519,7 +514,7 @@ describe('TrackRenderSystem: line styles', () => {
         renderer.renderStyle = 'centerline';
         graph.setNewSegmentStyle({ bed: true, electrified: true });
 
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         expect(host.bandKeys).toEqual(['__simplified__0']);
         expect(host.bandOf('__simplified__0')).toBe(4);
@@ -592,7 +587,7 @@ describe('TrackRenderSystem: line styles', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
 
-        layTrack(graph, [A, B], ELEVATION.SUB_1);
+        layTrack(graph, [A, B], -10);
 
         expect(host.bandKeys).toEqual(['__simplified__0']);
         const lines = strokedLines(host.bandItem('__simplified__0'));
@@ -606,7 +601,7 @@ describe('TrackRenderSystem: line styles', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
 
-        layRamp(graph, ELEVATION.SUB_1, ELEVATION.ABOVE_1);
+        layRamp(graph, -10, 10);
 
         const lines = strokedLines(host.bandItem('__simplified__0'));
         const black = lines.filter(line => line.color === 0x000000);
@@ -750,7 +745,7 @@ describe('TrackRenderSystem: line styles', () => {
         const { host, graph } = scene();
         graph.setNewSegmentStyle({ lineStyle: { preset: 'planned' } });
 
-        layTrack(graph, [A, B], ELEVATION.SUB_1);
+        layTrack(graph, [A, B], -10);
 
         const lines = strokedLines(host.bandItem('__simplified__0'));
         expect(lines).toHaveLength(1);
@@ -762,7 +757,7 @@ describe('TrackRenderSystem: line styles', () => {
         const { renderer, graph } = scene();
         renderer.renderStyle = 'rails';
 
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         expect(
             renderer.getTrackBandIndex({
@@ -775,7 +770,7 @@ describe('TrackRenderSystem: line styles', () => {
     it('draws nothing more when a segment is restyled', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         graph.setSegmentStyle(0, { bed: true, electrified: true });
 
@@ -829,7 +824,7 @@ describe('TrackRenderSystem: line styles', () => {
     it('redraws laid track when the style changes', async () => {
         const { host, graph, camera, renderer } = scene();
         graph.setNewSegmentStyle({ bed: true, electrified: true });
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
         const detailedKeys = host.bandKeys;
         await zoomTo(camera, 5);
 
@@ -875,7 +870,7 @@ describe('TrackRenderSystem: line styles', () => {
             curveCreation: curveCreation.source,
         });
         renderer.renderStyle = 'rails';
-        layTrack(graph, [A, B], ELEVATION.SUB_1);
+        layTrack(graph, [A, B], -10);
         curveCreation.emit(
             'onPreviewDrawDataChange',
             previewData(
@@ -906,12 +901,7 @@ describe('TrackRenderSystem: crossings and runs', () => {
     /** h along y = 0, then v across it at x = 50, one level up. */
     function crossing(graph: TrackGraph) {
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
         return { h, v };
     }
     function expectBridge(host: RecordingLayerHost, h: number, v: number) {
@@ -947,12 +937,7 @@ describe('TrackRenderSystem: crossings and runs', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
 
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
 
         expectBridge(host, h, v);
@@ -987,12 +972,7 @@ describe('TrackRenderSystem: crossings and runs', () => {
         renderer.renderStyle = 'centerline';
         const h1 = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
         const h2 = layLine(graph, { x: 0, y: 20 }, { x: 100, y: 20 });
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
         expect(xSpans(linesOf(host, h1))).toHaveLength(2);
         expect(xSpans(linesOf(host, h2))).toHaveLength(2);
 
@@ -1006,16 +986,10 @@ describe('TrackRenderSystem: crossings and runs', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        layLine(
-            graph,
-            { x: 20, y: -40 },
-            { x: 80, y: -40 },
-            ELEVATION.ABOVE_1,
-            {
-                x: 50,
-                y: 120,
-            }
-        );
+        layLine(graph, { x: 20, y: -40 }, { x: 80, y: -40 }, 10, {
+            x: 50,
+            y: 120,
+        });
 
         const spans = xSpans(linesOf(host, h));
 
@@ -1044,12 +1018,7 @@ describe('TrackRenderSystem: crossings and runs', () => {
     it('draws nothing where the lower track is underground', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
-        const h = layLine(
-            graph,
-            { x: 0, y: 0 },
-            { x: 100, y: 0 },
-            ELEVATION.SUB_1
-        );
+        const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 }, -10);
         const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 });
         const alone = scene();
         alone.renderer.renderStyle = 'centerline';
@@ -1057,7 +1026,7 @@ describe('TrackRenderSystem: crossings and runs', () => {
             alone.graph,
             { x: 0, y: 0 },
             { x: 100, y: 0 },
-            ELEVATION.SUB_1
+            -10
         );
 
         expect(linesOf(host, h)).toEqual(linesOf(alone.host, same));
@@ -1069,12 +1038,7 @@ describe('TrackRenderSystem: crossings and runs', () => {
         renderer.renderStyle = 'centerline';
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
         graph.setNewSegmentStyle({ lineStyle: { preset: 'tunnel' } });
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
 
         expect(linesOf(host, h)).toHaveLength(1);
         const acrossV = linesOf(host, v).filter(
@@ -1258,12 +1222,7 @@ describe('TrackRenderSystem: marks across joints', () => {
     /** Track A–B–C at ground level, and an upper track across it at x = 99, 1 m short of the joint. */
     function layGapScene(graph: TrackGraph) {
         layTrack(graph, [A, B, C]);
-        return layLine(
-            graph,
-            { x: 99, y: -50 },
-            { x: 99, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        return layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
     }
     const carriedGap: [number, number][][] = [
         [[0, 99 - GAP]],
@@ -1283,7 +1242,7 @@ describe('TrackRenderSystem: marks across joints', () => {
     it('carries a deck across the joint, with wings only at its true ends', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
-        layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B, C], 10);
 
         layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
 
@@ -1314,7 +1273,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         const bc = graph.getJoint(b!)!.connections.get(c!)!;
         const bd = graph.getJoint(b!)!.connections.get(d!)!;
 
-        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
 
         const minX = (n: number) => xSpans(linesOf(host, n))[0]![0]!;
         expect(minX(bc)).toBeCloseTo(99 + GAP, 6);
@@ -1332,7 +1291,7 @@ describe('TrackRenderSystem: marks across joints', () => {
             graph,
             { x: 99 - reach * Math.cos(angle), y: -reach * Math.sin(angle) },
             { x: 99 + reach * Math.cos(angle), y: reach * Math.sin(angle) },
-            ELEVATION.ABOVE_1
+            10
         );
 
         const half = (P + 0.5) / Math.sin(angle);
@@ -1343,7 +1302,7 @@ describe('TrackRenderSystem: marks across joints', () => {
 
     it('carries no deck onto a bridge segment, whose parapets run its length', () => {
         const layBridgeRun = (graph: TrackGraph) => {
-            layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+            layTrack(graph, [A, B, C], 10);
             graph.setSegmentStyle(1, { lineStyle: { preset: 'bridge' } });
         };
         const { host, graph, renderer } = scene();
@@ -1378,7 +1337,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         alone.renderer.renderStyle = 'centerline';
         layTunnel(alone.graph);
 
-        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
 
         expectSpans(xSpans(linesOf(host, 0)), carriedGap[0]!);
         expect(linesOf(host, 1)).toEqual(linesOf(alone.host, 1));
@@ -1396,7 +1355,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         alone.renderer.renderStyle = 'centerline';
         layTrack(alone.graph, [A, B, C]);
 
-        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
 
         // The first segment has its own gap (and a portal where it goes under).
         const centreLine = linesOf(host, 0).filter(line =>
@@ -1408,7 +1367,7 @@ describe('TrackRenderSystem: marks across joints', () => {
 
     it('carries no deck onto a tunnel segment', () => {
         const layTunnel = (graph: TrackGraph) => {
-            layTrack(graph, [A, B, C], ELEVATION.ABOVE_1);
+            layTrack(graph, [A, B, C], 10);
             graph.setSegmentStyle(1, { lineStyle: { preset: 'tunnel' } });
         };
         const { host, graph, renderer } = scene();
@@ -1427,7 +1386,7 @@ describe('TrackRenderSystem: marks across joints', () => {
     it('ends a deck at an open end with a wing', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
-        layTrack(graph, [A, B], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B], 10);
 
         layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 });
 
@@ -1441,7 +1400,7 @@ describe('TrackRenderSystem: marks across joints', () => {
     it('ends a deck that chains over a short segment with a wing at the open end', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
-        layTrack(graph, [A, B, { x: 105, y: 0 }], ELEVATION.ABOVE_1);
+        layTrack(graph, [A, B, { x: 105, y: 0 }], 10);
         const angle = (20 * Math.PI) / 180;
         const reach = 50;
 
@@ -1512,7 +1471,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
         const { joints } = layTrack(graph, [A, B]);
-        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
 
         const end = graph.createNewEmptyJoint(C, { x: 1, y: 0 });
         expect(graph.connectJoints(joints[1]!, end, [{ x: 150, y: 0 }])).toBe(
@@ -1532,7 +1491,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         );
         expect(graph.connectJoints(b!, c!, [{ x: 150, y: 0 }])).toBe(true);
         const next = graph.getJoint(b!)!.connections.get(c!)!;
-        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
         expectSpans(xSpans(linesOf(host, next)), [[100, 200]]);
 
         expect(graph.connectJoints(a!, b!, [{ x: 50, y: 0 }])).toBe(true);
@@ -1544,12 +1503,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         const { host, graph, renderer } = scene();
         renderer.renderStyle = 'centerline';
         const { segments } = layTrack(graph, [A, C]);
-        const upper = layLine(
-            graph,
-            { x: 99, y: -50 },
-            { x: 99, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const upper = layLine(graph, { x: 99, y: -50 }, { x: 99, y: 50 }, 10);
 
         graph.insertJointIntoTrackSegmentUsingTrackNumber(segments[0]!, 0.5);
 
@@ -1584,7 +1538,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         );
         const top = graph.getJoint(left!)!.connections.get(right!)!;
 
-        layLine(graph, { x: 96, y: 5 }, { x: 96, y: -0.5 }, ELEVATION.ABOVE_1);
+        layLine(graph, { x: 96, y: 5 }, { x: 96, y: -0.5 }, 10);
 
         expectSpans(xSpans(linesOf(host, top)), [[96 + GAP, 102]]);
         // Walking from the top side's start, the other two sides are each
@@ -1641,7 +1595,7 @@ describe('TrackRenderSystem: marks across joints', () => {
             graph,
             { x: 14 + 50 * Math.cos(angle), y: -50 * Math.sin(angle) },
             { x: 14 - 50 * Math.cos(angle), y: 50 * Math.sin(angle) },
-            ELEVATION.ABOVE_1
+            10
         );
 
         const overflow = (P + 0.5) / Math.sin(angle) - 10;
@@ -1657,12 +1611,7 @@ describe('TrackRenderSystem: marks across joints', () => {
             graph,
             [0, 10, 20, 30, 40, 50, 60].map(x => ({ x, y: 0 }))
         );
-        const upper = layLine(
-            graph,
-            { x: 25, y: -20 },
-            { x: 25, y: 20 },
-            ELEVATION.ABOVE_1
-        );
+        const upper = layLine(graph, { x: 25, y: -20 }, { x: 25, y: 20 }, 10);
         const crossings = spyOn(graph.trackCurveManager, 'getCrossings');
         /** The segments `event` looks up, in order; none of them twice. */
         const askedBy = (event: () => void): number[] => {
@@ -1735,12 +1684,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         const redrawH = (color: number) =>
             graph.setSegmentStyle(h, { lineStyle: { color } });
         try {
-            const v = layLine(
-                graph,
-                { x: 50, y: -50 },
-                { x: 50, y: 50 },
-                ELEVATION.ABOVE_1
-            );
+            const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
 
             redrawH(0x2266cc);
             expectSpans(xSpans(linesOf(host, h)), [
@@ -1824,7 +1768,7 @@ describe('TrackRenderSystem: marks across joints', () => {
             alone.graph,
             { x: 50, y: -50 },
             { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
+            10
         );
         alone.graph.setSegmentStyle(same, bridge);
 
@@ -1843,7 +1787,7 @@ describe('TrackRenderSystem: marks across joints', () => {
                 graph,
                 { x: 50 - 50 * Math.cos(angle), y: -50 * Math.sin(angle) },
                 { x: 50 + 50 * Math.cos(angle), y: 50 * Math.sin(angle) },
-                ELEVATION.ABOVE_1
+                10
             );
             return h;
         };
@@ -1864,12 +1808,7 @@ describe('TrackRenderSystem: marks across joints', () => {
         renderer.renderStyle = 'centerline';
         layTrack(graph, [A, B, C]);
 
-        layLine(
-            graph,
-            { x: 100, y: -50 },
-            { x: 100, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        layLine(graph, { x: 100, y: -50 }, { x: 100, y: 50 }, 10);
 
         expectSpans(xSpans(linesOf(host, 0)), [[0, 100 - GAP]]);
         expectSpans(xSpans(linesOf(host, 1)), [[100 + GAP, 200]]);
@@ -1878,12 +1817,7 @@ describe('TrackRenderSystem: marks across joints', () => {
     /** h along y = 0, then v across it at x = 50, one level up. */
     function layCrossing(graph: TrackGraph) {
         const h = layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
-        const v = layLine(
-            graph,
-            { x: 50, y: -50 },
-            { x: 50, y: 50 },
-            ELEVATION.ABOVE_1
-        );
+        const v = layLine(graph, { x: 50, y: -50 }, { x: 50, y: 50 }, 10);
         return { h, v };
     }
 
@@ -2024,11 +1958,8 @@ for (const style of ['centerline', 'rails'] as const) {
         const linesOf = (host: RecordingLayerHost, n: number) =>
             strokedLines(host.bandItem(`__simplified__${n}`));
         /** A straight upper track across y = 0 at `x`, laid toward +y. */
-        const upper = (
-            graph: TrackGraph,
-            x: number,
-            elevation = ELEVATION.ABOVE_1
-        ) => layLine(graph, { x, y: -50 }, { x, y: 50 }, elevation);
+        const upper = (graph: TrackGraph, x: number, elevation = 10) =>
+            layLine(graph, { x, y: -50 }, { x, y: 50 }, elevation);
         /** The lower track, along y = 0. */
         const lower = (graph: TrackGraph) =>
             layLine(graph, { x: 0, y: 0 }, { x: 100, y: 0 });
@@ -2137,7 +2068,7 @@ for (const style of ['centerline', 'rails'] as const) {
             const { host, graph } = lineScene();
             lower(graph);
             const u1 = upper(graph, 48);
-            const u2 = upper(graph, 52, ELEVATION.ABOVE_2);
+            const u2 = upper(graph, 52, 20);
 
             expect(parapetXs(host, u1, 48)).toHaveLength(2);
             expect(parapetXs(host, u2, 52)).toHaveLength(2);
@@ -2198,17 +2129,17 @@ for (const style of ['centerline', 'rails'] as const) {
             const j0 = graph.createNewEmptyJoint(
                 { x: 50, y: -40 },
                 { x: 0, y: 1 },
-                ELEVATION.ABOVE_1
+                10
             );
             const j1 = graph.createNewEmptyJoint(
                 { x: 50, y: 20 },
                 { x: 0, y: 1 },
-                ELEVATION.ABOVE_1
+                10
             );
             const j2 = graph.createNewEmptyJoint(
                 { x: 60, y: 20 },
                 PointCal.unitVector({ x: 10, y: 30 }),
-                ELEVATION.ABOVE_1
+                10
             );
             expect(graph.connectJoints(j0, j1, [{ x: 50, y: -10 }])).toBe(true);
             expect(graph.connectJoints(j0, j2, [{ x: 50, y: -10 }])).toBe(true);
@@ -2227,12 +2158,7 @@ for (const style of ['centerline', 'rails'] as const) {
             const { host, graph } = lineScene();
             lower(graph);
             const u1 = upper(graph, 48);
-            const u2 = layLine(
-                graph,
-                { x: 52, y: 50 },
-                { x: 52, y: -50 },
-                ELEVATION.ABOVE_1
-            );
+            const u2 = layLine(graph, { x: 52, y: 50 }, { x: 52, y: -50 }, 10);
 
             expectXs(parapetXs(host, u1, 48), [48 - P]);
             expectXs(parapetXs(host, u2, 52), [52 + P]);
@@ -2251,18 +2177,8 @@ for (const style of ['centerline', 'rails'] as const) {
         it('keeps two decks where the upper tracks cross over the lower track', () => {
             const { host, graph } = lineScene();
             lower(graph);
-            const u1 = layLine(
-                graph,
-                { x: 40, y: -50 },
-                { x: 60, y: 50 },
-                ELEVATION.ABOVE_1
-            );
-            const u2 = layLine(
-                graph,
-                { x: 60, y: -50 },
-                { x: 40, y: 50 },
-                ELEVATION.ABOVE_1
-            );
+            const u1 = layLine(graph, { x: 40, y: -50 }, { x: 60, y: 50 }, 10);
+            const u2 = layLine(graph, { x: 60, y: -50 }, { x: 40, y: 50 }, 10);
 
             expect(linesOf(host, u1)).toHaveLength(LINES + 2);
             expect(linesOf(host, u2)).toHaveLength(LINES + 2);
@@ -2278,13 +2194,13 @@ for (const style of ['centerline', 'rails'] as const) {
                 graph,
                 { x: 50 - dx, y: -1 - dy },
                 { x: 50 + dx, y: -1 + dy },
-                ELEVATION.ABOVE_1
+                10
             );
             const u2 = layLine(
                 graph,
                 { x: 50 + dx, y: -1 - dy },
                 { x: 50 - dx, y: -1 + dy },
-                ELEVATION.ABOVE_1
+                10
             );
 
             expect(linesOf(host, u1)).toHaveLength(LINES + 2);
@@ -2298,11 +2214,7 @@ for (const style of ['centerline', 'rails'] as const) {
          */
         function splitUpper(graph: TrackGraph, x: number, reversed = false) {
             const [low, mid, high] = [-50, 1, 50].map(y =>
-                graph.createNewEmptyJoint(
-                    { x, y },
-                    { x: 0, y: 1 },
-                    ELEVATION.ABOVE_1
-                )
+                graph.createNewEmptyJoint({ x, y }, { x: 0, y: 1 }, 10)
             ) as [number, number, number];
             expect(graph.connectJoints(low, mid, [{ x, y: -24.5 }])).toBe(true);
             const bottom = graph.getJoint(low)!.connections.get(mid)!;
