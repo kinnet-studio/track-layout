@@ -12,7 +12,7 @@ import {
     sameDirection,
 } from '@ue-too/math';
 
-import { roundHeight } from './heights.js';
+import { isValidHeight, roundHeight } from './heights.js';
 import {
     type SegmentStyle,
     type SegmentStyleChange,
@@ -53,6 +53,14 @@ export function defaultYieldToFrame(): Promise<void> {
     }
     return new Promise(resolve => setTimeout(resolve, 0));
 }
+
+/**
+ * Why TrackGraph.setJointElevation changed nothing: there is no such joint,
+ * the height is outside HEIGHT_MIN to HEIGHT_MAX, or a segment at the joint
+ * is protected.
+ */
+export type JointElevationRefusal =
+    'unknownJoint' | 'outOfRange' | 'protectedSegment';
 
 export type SegmentSplitInfo = {
     oldSegmentNumber: number;
@@ -100,7 +108,7 @@ export class TrackGraph {
         return this._jointManager.getJoints();
     }
 
-    getJoint(jointNumber: number): TrackJoint | null {
+    getJoint(jointNumber: number): TrackJointWithElevation | null {
         return this._jointManager.getJoint(jointNumber);
     }
 
@@ -1347,6 +1355,69 @@ export class TrackGraph {
         options?: SubscriptionOptions
     ) {
         return this._trackCurveManager.onSegmentStyleChanged(callback, options);
+    }
+
+    /**
+     * Moves joint `joint` to `metres`, rounded to 0.01 m, and the end of each
+     * segment that meets it there. The segments keep their numbers and are
+     * rebuilt in place, each firing onSegmentElevationChanged. The laying
+     * rules are not checked, so a junction can be left with a sloped branch.
+     * Returns why nothing changed, or null; a height the joint already has
+     * changes nothing and returns null.
+     */
+    setJointElevation(
+        joint: number,
+        metres: number
+    ): JointElevationRefusal | null {
+        const elevation = roundHeight(metres);
+        if (!isValidHeight(elevation)) {
+            return 'outOfRange';
+        }
+        const trackJoint = this._jointManager.getJoint(joint);
+        if (trackJoint === null) {
+            return 'unknownJoint';
+        }
+        const segments = [...new Set(trackJoint.connections.values())];
+        if (segments.some(n => this.isSegmentProtected(n))) {
+            return 'protectedSegment';
+        }
+        if (trackJoint.elevation === elevation) {
+            return null;
+        }
+
+        trackJoint.elevation = elevation;
+        for (const segmentNumber of segments) {
+            const segment =
+                this._trackCurveManager.getTrackSegmentWithJoints(
+                    segmentNumber
+                );
+            if (segment === null) {
+                continue;
+            }
+            this._trackCurveManager.setSegmentElevation(segmentNumber, {
+                from:
+                    segment.t0Joint === joint
+                        ? elevation
+                        : segment.elevation.from,
+                to:
+                    segment.t1Joint === joint
+                        ? elevation
+                        : segment.elevation.to,
+            });
+        }
+        this._drawDataDirty = true;
+        return null;
+    }
+
+    /** Subscribe to segment height changes, such as from setJointElevation. */
+    onSegmentElevationChanged(
+        callback: (segmentNumber: number) => void,
+        options?: SubscriptionOptions
+    ) {
+        return this._trackCurveManager.onSegmentElevationChanged(
+            callback,
+            options
+        );
     }
 
     /**
