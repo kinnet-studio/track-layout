@@ -62,8 +62,8 @@ export const findElevationInterval = (
  * Draw order (bottom to top): bed → drawable → rail → onTrack → catenary → shadow.
  *
  * Shadow is drawn last within its band so a higher track's shadow (placed in
- * the band one level below the track) paints over tracks/rails at that lower
- * level. Terrain occlusion for the next band still hides it because occlusion
+ * the band below the track's) paints over tracks/rails in that lower band.
+ * Terrain occlusion for the next band still hides it because occlusion
  * containers sit between bands in the parent z-order.
  */
 export type BandSublayer = 'drawable' | 'rail' | 'onTrack' | 'catenary';
@@ -121,13 +121,13 @@ export class WorldRenderSystem implements LayerHost {
     private _drawDataBelow: Container;
     /** Non-banded drawables (previews, etc.) keyed by string. */
     private _drawableMap: Map<string, Container> = new Map();
-    /** Shadow items keyed by string. */
+    /** Shadow items keyed by string, with the band each sits in. */
     private _shadowMap: Map<
         string,
-        { container: Container; bandHeight: number }
+        { container: Container; bandIndex: number }
     > = new Map();
-    /** Bed items keyed by string (shared per elevation, renders before rails). */
-    private _bedMap: Map<string, { container: Container; bandHeight: number }> =
+    /** Bed items keyed by string (shared per band, renders before rails). */
+    private _bedMap: Map<string, { container: Container; bandIndex: number }> =
         new Map();
     /** Band items keyed by string. */
     private _bandItemMap: Map<
@@ -136,8 +136,6 @@ export class WorldRenderSystem implements LayerHost {
     > = new Map();
     /** Elevation bands indexed by band index. */
     private _bands: ElevationBand[] = [];
-    /** Map from band height in metres to band index. */
-    private _elevationToBandIndex: Map<number, number> = new Map();
 
     /** Container for the base terrain visual (shading + contour lines). Renders below all bands. */
     private _terrainBaseContainer: Container;
@@ -186,7 +184,7 @@ export class WorldRenderSystem implements LayerHost {
         this._terrainBaseContainer.sortableChildren = true;
         this._drawDataBelow.addChild(this._terrainBaseContainer);
 
-        DETAILED_BAND_HEIGHTS.forEach((bandHeight, i) => {
+        for (let i = 0; i < DETAILED_BAND_HEIGHTS.length; i++) {
             // Terrain occlusion container sits between band[i-1] and band[i]
             const occlusionContainer = new Container();
             occlusionContainer.zIndex = i - 0.5;
@@ -196,8 +194,7 @@ export class WorldRenderSystem implements LayerHost {
             const band = this._createBand(i);
             this._drawDataBelow.addChild(band.container);
             this._bands.push(band);
-            this._elevationToBandIndex.set(bandHeight, i);
-        });
+        }
     }
 
     private _createBand(bandIndex: number): ElevationBand {
@@ -382,27 +379,26 @@ export class WorldRenderSystem implements LayerHost {
     // -------------------------------------------------------------------------
 
     /**
-     * Add shadow graphics to the shadow container in the band at the given height.
+     * Add shadow graphics to the shadow container of the band for
+     * `bandHeight`, in metres. A height between bands goes in the band above,
+     * as with {@link getElevationBandIndex}.
      *
-     * For tracks: use the track's top elevation (shadow falls just below the track).
-     * For buildings: use one level above the base elevation (shadow falls on
-     * the ground next to the building, below elevated objects).
+     * For tracks, TrackRenderSystem passes the band below the track's top
+     * height, so the shadow falls just below the track and terrain in the
+     * track's own band hides it. For buildings: use the band above the base
+     * height (shadow falls on the ground next to the building, below
+     * elevated objects).
      */
     addShadow(key: string, container: Container, bandHeight: number): void {
-        const bandIndex = this._elevationToBandIndex.get(bandHeight);
-        if (bandIndex !== undefined) {
-            this._bands[bandIndex].shadow.addChild(container);
-        }
-        this._shadowMap.set(key, { container, bandHeight });
+        const bandIndex = getBandIndexForHeight(bandHeight);
+        this._bands[bandIndex].shadow.addChild(container);
+        this._shadowMap.set(key, { container, bandIndex });
     }
 
     removeShadow(key: string): void {
         const shadow = this._shadowMap.get(key);
         if (shadow !== undefined) {
-            const bandIndex = this._elevationToBandIndex.get(shadow.bandHeight);
-            if (bandIndex !== undefined) {
-                this._bands[bandIndex].shadow.removeChild(shadow.container);
-            }
+            this._bands[shadow.bandIndex].shadow.removeChild(shadow.container);
             shadow.container.destroy({ children: true });
             this._shadowMap.delete(key);
         }
@@ -413,27 +409,24 @@ export class WorldRenderSystem implements LayerHost {
     // -------------------------------------------------------------------------
 
     /**
-     * Add a bed container to the shared bed layer at the given elevation.
+     * Add a bed container to the shared bed layer of the band for
+     * `bandHeight`, in metres. A height between bands goes in the band above,
+     * as with {@link getElevationBandIndex}.
      *
-     * All bed items at the same elevation render together before any track
+     * All bed items in the same band render together before any track
      * drawables, preventing one track's bed from covering another track's
      * rails at junctions.
      */
     addBed(key: string, container: Container, bandHeight: number): void {
-        const bandIndex = this._elevationToBandIndex.get(bandHeight);
-        if (bandIndex !== undefined) {
-            this._bands[bandIndex].bed.addChild(container);
-        }
-        this._bedMap.set(key, { container, bandHeight });
+        const bandIndex = getBandIndexForHeight(bandHeight);
+        this._bands[bandIndex].bed.addChild(container);
+        this._bedMap.set(key, { container, bandIndex });
     }
 
     removeBed(key: string): void {
         const bed = this._bedMap.get(key);
         if (bed !== undefined) {
-            const bandIndex = this._elevationToBandIndex.get(bed.bandHeight);
-            if (bandIndex !== undefined) {
-                this._bands[bandIndex].bed.removeChild(bed.container);
-            }
+            this._bands[bed.bandIndex].bed.removeChild(bed.container);
             bed.container.destroy({ children: true });
             this._bedMap.delete(key);
         }
@@ -474,20 +467,14 @@ export class WorldRenderSystem implements LayerHost {
     }
 
     cleanup(): void {
-        this._shadowMap.forEach(({ container, bandHeight }) => {
-            const bandIndex = this._elevationToBandIndex.get(bandHeight);
-            if (bandIndex !== undefined) {
-                this._bands[bandIndex].shadow.removeChild(container);
-            }
+        this._shadowMap.forEach(({ container, bandIndex }) => {
+            this._bands[bandIndex].shadow.removeChild(container);
             container.destroy({ children: true });
         });
         this._shadowMap.clear();
 
-        this._bedMap.forEach(({ container, bandHeight }) => {
-            const bandIndex = this._elevationToBandIndex.get(bandHeight);
-            if (bandIndex !== undefined) {
-                this._bands[bandIndex].bed.removeChild(container);
-            }
+        this._bedMap.forEach(({ container, bandIndex }) => {
+            this._bands[bandIndex].bed.removeChild(container);
             container.destroy({ children: true });
         });
         this._bedMap.clear();

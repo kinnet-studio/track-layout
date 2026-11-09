@@ -31,11 +31,11 @@ export interface LayerHost {
     getElevationBandIndex(metres: number): number;
     /** The height in metres of the band for a height in metres. */
     resolveElevationLevel(metres: number): number;
-    /** Adds to the shared bed layer at a band height in metres. */
+    /** Adds to the shared bed layer of the band for a height in metres. */
     addBed(key: string, container: Container, bandHeight: number): void;
     /** Removes and destroys a bed. */
     removeBed(key: string): void;
-    /** Adds to the shared shadow layer at a band height in metres. */
+    /** Adds to the shared shadow layer of the band for a height in metres. */
     addShadow(key: string, container: Container, bandHeight: number): void;
     /** Removes and destroys a shadow. */
     removeShadow(key: string): void;

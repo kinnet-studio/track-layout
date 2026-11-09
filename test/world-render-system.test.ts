@@ -55,6 +55,26 @@ describe('WorldRenderSystem', () => {
         expect(placement(shadow).bandZ).toBe(2);
     });
 
+    it('puts a bed or shadow at a height between bands in the band above', () => {
+        const host = new WorldRenderSystem();
+        const bed = new Container();
+        const shadow = new Container();
+        const high = new Container();
+
+        host.addBed('b', bed, 12.35);
+        host.addShadow('s', shadow, -0.5);
+        host.addBed('h', high, 150);
+
+        expect(placement(bed).bandZ).toBe(5);
+        expect(placement(shadow).bandZ).toBe(3);
+        expect(placement(high).bandZ).toBe(6);
+
+        host.removeBed('b');
+        host.removeShadow('s');
+        expect(bed.destroyed).toBe(true);
+        expect(shadow.destroyed).toBe(true);
+    });
+
     it('stacks a band as bed, drawable, rail, onTrack, catenary, shadow', () => {
         const host = new WorldRenderSystem();
         const items = {
