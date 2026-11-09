@@ -62,20 +62,16 @@ function geometriesOf(ts: TrackScene) {
 
 let graph: TrackGraph;
 let spy: ReturnType<typeof spyOnGeometryDispose> | undefined;
-let consoleSpies: Array<ReturnType<typeof spyOn>> = [];
+let infoSpy: ReturnType<typeof spyOn> | undefined;
 
 beforeEach(() => {
-    // TrackGraph logs every connectJoints and EntityManager reports growth;
-    // keep the test output clean.
-    consoleSpies = [
-        spyOn(console, 'log').mockImplementation(() => {}),
-        spyOn(console, 'info').mockImplementation(() => {}),
-    ];
+    // EntityManager reports each time it grows; keep the test output clean.
+    infoSpy = spyOn(console, 'info').mockImplementation(() => {});
     graph = new TrackGraph();
 });
 afterEach(() => {
-    for (const s of consoleSpies) s.mockRestore();
-    consoleSpies = [];
+    infoSpy?.mockRestore();
+    infoSpy = undefined;
     spy?.restore();
     spy = undefined;
 });
