@@ -104,8 +104,8 @@ ${WIDTH_GLSL}`,
 };
 
 // ---------------------------------------------------------------------------
-// Sleepers, drawn as stripes on the ballast or slab top, after the 2D textures
-// in track-render-system.ts.
+// Sleepers, drawn as stripes in a decal over the ballast or slab top, after the
+// 2D textures in track-render-system.ts.
 
 /** Sleeper pitch along the track (m): the 2D texture's `TRACK_TEXTURE_TILE_LEN`. */
 const SLEEPER_PITCH = 0.6;
@@ -152,10 +152,9 @@ varying float vMetresPerPixel;`,
 
 /**
  * The stripes are box-filtered over each pixel's footprint, so ties thinner
- * than a pixel blend into the ballast instead of shimmering.
+ * than a pixel fade into the surface under them instead of shimmering.
  */
 const SLEEPER_FRAGMENT_PARS = /* glsl */ `
-uniform vec3 uSleeperColor;
 varying float vAlong;
 varying float vAcross;
 varying float vHalfWidth;
@@ -194,6 +193,7 @@ const SLEEPER_ACROSS: Record<SurfaceStyle, string> = {
         );`,
 };
 
+/** The decal's alpha: how much of the pixel is sleeper, after the fade. */
 function sleeperFragmentMain(style: SurfaceStyle): string {
     const duty = style === 'ballast' ? TIE_DUTY : BLOCK_DUTY;
     return /* glsl */ `
@@ -205,7 +205,7 @@ function sleeperFragmentMain(style: SurfaceStyle): string {
             ${f(SLEEPER_FADE_START)}, ${f(SLEEPER_FADE_END)}, vMetresPerPixel
         );
         float sleeper = along * across * shown;
-        diffuseColor.rgb = mix(diffuseColor.rgb, uSleeperColor, sleeper);
+        diffuseColor.a *= sleeper;
     }`;
 }
 
@@ -286,16 +286,13 @@ function widened(uniforms: TrackUniforms): Extension {
     };
 }
 
-function widenedWithSleepers(
+/** The surface's widening, plus the sleeper stripes as alpha. */
+function widenedSleepers(
     uniforms: TrackUniforms,
-    style: SurfaceStyle,
-    sleeperColor: number
+    style: SurfaceStyle
 ): Extension {
     return {
-        uniforms: {
-            ...uniforms,
-            uSleeperColor: { value: new Color(sleeperColor) },
-        },
+        uniforms,
         vertexPars: WIDEN_VERTEX.pars + SLEEPER_VERTEX.pars,
         vertexMain: WIDEN_VERTEX.main + SLEEPER_VERTEX.main,
         fragmentPars: SLEEPER_FRAGMENT_PARS,
@@ -309,6 +306,19 @@ function runningStrip(runningColor: number): Extension {
         ...RUNNING_STRIP,
     };
 }
+
+/**
+ * Polygon offsets (factor and units) that order the parts where they meet at
+ * one depth: the bed under the surfaces, slab over ballast, the sleepers over
+ * both, and the rails over everything.
+ */
+const POLYGON_OFFSET = {
+    bed: -1,
+    ballast: -2,
+    slab: -3,
+    sleepers: -4,
+    rails: -5,
+};
 
 /**
  * A Lambert material, with `extension` added to its shader. three caches
@@ -334,19 +344,46 @@ function lambert(
     return material;
 }
 
+/**
+ * A sleeper decal in `color`, drawn over its surface's geometry: it blends by
+ * stripe coverage and writes no depth, so overlapping decals all show.
+ */
+function sleeperDecal(
+    uniforms: TrackUniforms,
+    style: SurfaceStyle,
+    color: number
+): MeshLambertMaterial {
+    const material = lambert(
+        `${style}Sleepers`,
+        color,
+        POLYGON_OFFSET.sleepers,
+        widenedSleepers(uniforms, style)
+    );
+    material.transparent = true;
+    material.depthWrite = false;
+    return material;
+}
+
 const isPerspective = (camera: Camera): camera is PerspectiveCamera =>
     (camera as PerspectiveCamera).isPerspectiveCamera === true;
 const isOrthographic = (camera: Camera): camera is OrthographicCamera =>
     (camera as OrthographicCamera).isOrthographicCamera === true;
 
 /**
- * One material per part of the laid track, shared by every segment. The
- * ballast, slab and bed stay at least `MIN_TRACK_WIDTH_PX` wide on screen;
- * call `update` with the camera before each render.
+ * One material per part of the laid track, shared by every segment. Call
+ * `update` with the camera before each render.
  *
- * Same-height surfaces of a style share one material and so one colour,
- * which keeps overlaps at a junction or diamond from flickering. The polygon
- * offsets keep the bed under the surfaces and the rails over them.
+ * A segment's surface is drawn twice over the same geometry: once with
+ * `ballast` or `slab`, a plain colour, and once with the matching
+ * `ballastSleepers` or `slabSleepers` decal, which blends the sleepers on top
+ * and writes no depth. The ballast, slab, bed and both decals stay at least
+ * `MIN_TRACK_WIDTH_PX` wide on screen, and a decal widens exactly as its
+ * surface does.
+ *
+ * Same-height surfaces of a style share one plain colour, so overlaps at a
+ * junction or diamond can't flicker; where two segments' sleepers overlap,
+ * both show. The polygon offsets (factor and units) order the parts at one
+ * depth: bed −1, ballast −2, slab −3, sleepers −4, rails −5.
  */
 export class TrackMaterials {
     readonly uniforms: TrackUniforms = {
@@ -356,23 +393,37 @@ export class TrackMaterials {
         uViewportHeight: { value: 1 },
         uMinWidthPx: { value: MIN_TRACK_WIDTH_PX },
     };
-    /** The ballasted surface, with concrete ties. */
+    /** The ballasted surface. */
     readonly ballast = lambert(
         'ballast',
         0x706860,
-        -2,
-        widenedWithSleepers(this.uniforms, 'ballast', 0xa8a8a0)
+        POLYGON_OFFSET.ballast,
+        widened(this.uniforms)
     );
-    /** The slab surface, with a tie block under each rail. */
+    /** Concrete ties, drawn over a `ballast` mesh's geometry. */
+    readonly ballastSleepers = sleeperDecal(this.uniforms, 'ballast', 0xa8a8a0);
+    /** The slab surface. */
     readonly slab = lambert(
         'slab',
         0xc0bab0,
-        -2,
-        widenedWithSleepers(this.uniforms, 'slab', 0xa09a90)
+        POLYGON_OFFSET.slab,
+        widened(this.uniforms)
     );
-    readonly bed = lambert('bed', 0x5a5248, -1, widened(this.uniforms));
+    /** A tie block under each rail, drawn over a `slab` mesh's geometry. */
+    readonly slabSleepers = sleeperDecal(this.uniforms, 'slab', 0xa09a90);
+    readonly bed = lambert(
+        'bed',
+        0x5a5248,
+        POLYGON_OFFSET.bed,
+        widened(this.uniforms)
+    );
     /** Rust rails with a silver running strip on top. */
-    readonly rails = lambert('rails', 0x6b3a1f, -4, runningStrip(0xd0d0d0));
+    readonly rails = lambert(
+        'rails',
+        0x6b3a1f,
+        POLYGON_OFFSET.rails,
+        runningStrip(0xd0d0d0)
+    );
     /** The masts and the contact wire. */
     readonly catenary = lambert('catenary', 0x606060, null);
 
@@ -380,11 +431,16 @@ export class TrackMaterials {
      * Feed the camera into the shared uniforms. `viewportHeightPx` is the
      * viewport height in the pixels the minimum width counts: CSS pixels, as
      * the board's `viewPortHeight` is.
+     *
+     * Zoomed out far enough that the sleepers have faded, an orthographic
+     * camera hides the decals to skip their draws. A perspective camera
+     * fades them per vertex, so they stay visible.
      */
     update(camera: Camera, viewportHeightPx: number): void {
         if (!(viewportHeightPx > 0)) return;
         const u = this.uniforms;
         u.uViewportHeight.value = viewportHeightPx;
+        let sleepersShown = true;
         if (isPerspective(camera)) {
             u.uPerspective.value = 1;
             u.uFovTan.value =
@@ -393,7 +449,10 @@ export class TrackMaterials {
             u.uPerspective.value = 0;
             u.uMetresPerPixel.value =
                 (camera.top - camera.bottom) / camera.zoom / viewportHeightPx;
+            sleepersShown = u.uMetresPerPixel.value < SLEEPER_FADE_END;
         }
+        this.ballastSleepers.visible = sleepersShown;
+        this.slabSleepers.visible = sleepersShown;
     }
 
     /** Show or hide the rails and catenary. */
@@ -405,7 +464,9 @@ export class TrackMaterials {
     dispose(): void {
         for (const material of [
             this.ballast,
+            this.ballastSleepers,
             this.slab,
+            this.slabSleepers,
             this.bed,
             this.rails,
             this.catenary,

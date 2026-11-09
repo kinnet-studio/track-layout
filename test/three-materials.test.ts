@@ -57,6 +57,26 @@ function compiled(
     return shader;
 }
 
+/** Every material, in property order. */
+const allParts = (m: TrackMaterials) => [
+    m.ballast,
+    m.ballastSleepers,
+    m.slab,
+    m.slabSleepers,
+    m.bed,
+    m.rails,
+    m.catenary,
+];
+
+/** The materials whose shaders keep the track at least 2 px wide. */
+const widenedParts = (m: TrackMaterials) => [
+    m.ballast,
+    m.ballastSleepers,
+    m.slab,
+    m.slabSleepers,
+    m.bed,
+];
+
 /** `code` comes after `#include <after>` and before `#include <before>`. */
 function expectBetween(
     source: string,
@@ -158,12 +178,13 @@ describe('TrackMaterials', () => {
 
     it('colours each part as 2D Detailed does', () => {
         const m = new TrackMaterials();
-        const parts = [m.ballast, m.slab, m.bed, m.rails, m.catenary];
+        const parts = allParts(m);
         for (const part of parts) {
             expect(part).toBeInstanceOf(MeshLambertMaterial);
         }
         expect(parts.map(p => p.color.getHex())).toEqual([
-            0x706860, 0xc0bab0, 0x5a5248, 0x6b3a1f, 0x606060,
+            0x706860, 0xa8a8a0, 0xc0bab0, 0xa09a90, 0x5a5248, 0x6b3a1f,
+            0x606060,
         ]);
     });
 
@@ -176,22 +197,55 @@ describe('TrackMaterials', () => {
         ];
         expect(offsets(m.bed)).toEqual([true, -1, -1]);
         expect(offsets(m.ballast)).toEqual([true, -2, -2]);
-        expect(offsets(m.slab)).toEqual([true, -2, -2]);
-        expect(offsets(m.rails)).toEqual([true, -4, -4]);
-        for (const part of [m.ballast, m.slab, m.bed, m.rails]) {
+        expect(offsets(m.slab)).toEqual([true, -3, -3]);
+        expect(offsets(m.ballastSleepers)).toEqual([true, -4, -4]);
+        expect(offsets(m.slabSleepers)).toEqual([true, -4, -4]);
+        expect(offsets(m.rails)).toEqual([true, -5, -5]);
+        expect(offsets(m.catenary)[0]).toBe(false);
+        for (const part of allParts(m)) {
             expect(part.depthTest).toBe(true);
         }
+    });
+
+    it('blends the sleeper decals over their surface without writing depth', () => {
+        const m = new TrackMaterials();
+        for (const decal of [m.ballastSleepers, m.slabSleepers]) {
+            expect([decal.transparent, decal.depthWrite]).toEqual([
+                true,
+                false,
+            ]);
+        }
+        for (const part of [m.ballast, m.slab, m.bed, m.rails, m.catenary]) {
+            expect([part.transparent, part.depthWrite]).toEqual([false, true]);
+        }
+    });
+
+    it('skips the sleeper decals once a straight-down view has faded them', () => {
+        const m = new TrackMaterials();
+        const decalsVisible = () => [
+            m.ballastSleepers.visible,
+            m.slabSleepers.visible,
+        ];
+        m.update(orthoAtZoom(5), HEIGHT);
+        expect(decalsVisible()).toEqual([true, true]);
+        m.update(orthoAtZoom(2.6), HEIGHT); // 0.385 m/px: still fading
+        expect(decalsVisible()).toEqual([true, true]);
+        m.update(orthoAtZoom(2.5), HEIGHT); // 0.4 m/px: faded out
+        expect(decalsVisible()).toEqual([false, false]);
+        // A perspective camera fades them per vertex, so it keeps them.
+        m.update(new PerspectiveCamera(45, WIDTH / HEIGHT), HEIGHT);
+        expect(decalsVisible()).toEqual([true, true]);
     });
 
     it('shows and hides the rails and catenary', () => {
         const m = new TrackMaterials();
         m.setDetailVisible(false);
         expect([m.rails.visible, m.catenary.visible]).toEqual([false, false]);
-        expect([m.ballast.visible, m.slab.visible, m.bed.visible]).toEqual([
-            true,
-            true,
-            true,
-        ]);
+        expect(
+            [m.ballast, m.ballastSleepers, m.slab, m.slabSleepers, m.bed].map(
+                p => p.visible
+            )
+        ).toEqual([true, true, true, true, true]);
         m.setDetailVisible(true);
         expect([m.rails.visible, m.catenary.visible]).toEqual([true, true]);
     });
@@ -199,12 +253,13 @@ describe('TrackMaterials', () => {
     it('disposes every material', () => {
         const m = new TrackMaterials();
         const disposed: Material[] = [];
-        const parts = [m.ballast, m.slab, m.bed, m.rails, m.catenary];
+        const parts = allParts(m);
         for (const part of parts) {
             part.addEventListener('dispose', () => disposed.push(part));
         }
         m.dispose();
-        expect(disposed).toEqual(parts);
+        expect(disposed).toHaveLength(7);
+        expect(new Set(disposed)).toEqual(new Set(parts));
     });
 });
 
@@ -218,9 +273,9 @@ describe('TrackMaterials shaders', () => {
         }
     });
 
-    it('widens the ballast, slab and bed between begin_vertex and project_vertex', () => {
+    it('widens the surfaces, sleeper decals and bed between begin_vertex and project_vertex', () => {
         const m = new TrackMaterials();
-        for (const part of [m.ballast, m.slab, m.bed]) {
+        for (const part of widenedParts(m)) {
             const { vertexShader } = compiled(part);
             expect(vertexShader).toContain('attribute vec2 aAcross;');
             expect(vertexShader).toContain('attribute float aSide;');
@@ -236,7 +291,7 @@ describe('TrackMaterials shaders', () => {
 
     it('shares one set of uniforms between the widened shaders', () => {
         const m = new TrackMaterials();
-        for (const part of [m.ballast, m.slab, m.bed]) {
+        for (const part of widenedParts(m)) {
             const { uniforms } = compiled(part);
             for (const name of [
                 'uMetresPerPixel',
@@ -250,10 +305,10 @@ describe('TrackMaterials shaders', () => {
         }
     });
 
-    it('draws sleeper stripes in the ballast and slab shaders', () => {
+    it('draws the sleeper stripes as the decals’ alpha', () => {
         const m = new TrackMaterials();
-        const ballast = compiled(m.ballast);
-        const slab = compiled(m.slab);
+        const ballast = compiled(m.ballastSleepers);
+        const slab = compiled(m.slabSleepers);
         for (const shader of [ballast, slab]) {
             expect(shader.vertexShader).toContain('vAlong = aAlong;');
             expect(shader.vertexShader).toContain(
@@ -261,20 +316,48 @@ describe('TrackMaterials shaders', () => {
             );
             expectBetween(
                 shader.fragmentShader,
-                'uSleeperColor, sleeper',
+                'diffuseColor.a *= sleeper;',
                 'color_fragment',
                 'lights_lambert_fragment'
             );
+            expect(shader.fragmentShader).toContain('stripeCoverage(');
             expect(shader.fragmentShader).toContain('vMetresPerPixel');
         }
-        expect(ballast.uniforms.uSleeperColor.value.getHex()).toBe(0xa8a8a0);
-        expect(slab.uniforms.uSleeperColor.value.getHex()).toBe(0xa09a90);
         expect(slab.fragmentShader).not.toBe(ballast.fragmentShader);
     });
 
-    it('leaves the bed without sleepers', () => {
-        const { fragmentShader } = compiled(new TrackMaterials().bed);
-        expect(fragmentShader).toBe(ShaderLib.lambert.fragmentShader);
+    it('widens each decal exactly as its surface', () => {
+        const m = new TrackMaterials();
+        // The code each adds after begin_vertex: the decal's starts with
+        // all of its surface's, then only sets varyings.
+        const added = (part: Material) => {
+            const { vertexShader } = compiled(part);
+            return vertexShader
+                .slice(
+                    vertexShader.indexOf('#include <begin_vertex>'),
+                    vertexShader.indexOf('#include <morphtarget_vertex>')
+                )
+                .trimEnd();
+        };
+        for (const [surface, decal] of [
+            [m.ballast, m.ballastSleepers],
+            [m.slab, m.slabSleepers],
+        ]) {
+            expect(added(surface)).toContain('transformed.xy +=');
+            expect(added(decal).startsWith(added(surface))).toBe(true);
+            expect(added(decal).slice(added(surface).length)).not.toContain(
+                'transformed'
+            );
+        }
+    });
+
+    it('leaves the ballast, slab and bed without sleeper code', () => {
+        const m = new TrackMaterials();
+        for (const part of [m.ballast, m.slab, m.bed]) {
+            const { vertexShader, fragmentShader } = compiled(part);
+            expect(vertexShader).not.toContain('aAlong');
+            expect(fragmentShader).toBe(ShaderLib.lambert.fragmentShader);
+        }
     });
 
     it('draws the rails’ running strip silver', () => {
@@ -291,10 +374,17 @@ describe('TrackMaterials shaders', () => {
 
     it('gives each changed shader its own program cache key', () => {
         const m = new TrackMaterials();
-        const keys = [m.ballast, m.slab, m.bed, m.rails].map(p =>
-            p.customProgramCacheKey()
-        );
-        expect(new Set(keys).size).toBe(4);
+        const keys = [
+            m.ballast,
+            m.ballastSleepers,
+            m.slab,
+            m.slabSleepers,
+            m.bed,
+            m.rails,
+        ].map(p => p.customProgramCacheKey());
+        expect(new Set(keys).size).toBe(6);
+        expect(keys).toContain('track-layout:ballastSleepers');
+        expect(keys).toContain('track-layout:slabSleepers');
         expect(keys).not.toContain(
             new MeshLambertMaterial().customProgramCacheKey()
         );
