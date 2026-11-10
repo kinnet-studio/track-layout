@@ -323,14 +323,16 @@ const POLYGON_OFFSET = {
 
 /**
  * A Lambert material, with `extension` added to its shader. three caches
- * compiled programs by `customProgramCacheKey()`, so each extended material
- * gets its own key.
+ * compiled programs by `customProgramCacheKey()`, so materials whose shaders
+ * are identical share a `programKey` and three compiles one program for them.
+ * `programKey` defaults to `name`.
  */
 function lambert(
-    key: string,
+    name: string,
     color: number,
     polygonOffset: number | null,
-    extension?: Extension
+    extension?: Extension,
+    programKey = name
 ): MeshLambertMaterial {
     const material = new MeshLambertMaterial({ color });
     if (polygonOffset !== null) {
@@ -340,7 +342,7 @@ function lambert(
     }
     if (extension !== undefined) {
         material.onBeforeCompile = shader => extend(shader, extension);
-        material.customProgramCacheKey = () => `track-layout:${key}`;
+        material.customProgramCacheKey = () => `track-layout:${programKey}`;
     }
     return material;
 }
@@ -401,7 +403,8 @@ export class TrackMaterials {
         'ballast',
         0x706860,
         POLYGON_OFFSET.ballast,
-        widened(this.uniforms)
+        widened(this.uniforms),
+        'widened'
     );
     /** Concrete ties, drawn over a `ballast` mesh's geometry. */
     readonly ballastSleepers = sleeperDecal(this.uniforms, 'ballast', 0xa8a8a0);
@@ -410,7 +413,8 @@ export class TrackMaterials {
         'slab',
         0xc0bab0,
         POLYGON_OFFSET.slab,
-        widened(this.uniforms)
+        widened(this.uniforms),
+        'widened'
     );
     /** A tie block under each rail, drawn over a `slab` mesh's geometry. */
     readonly slabSleepers = sleeperDecal(this.uniforms, 'slab', 0xa09a90);
@@ -418,7 +422,8 @@ export class TrackMaterials {
         'bed',
         0x5a5248,
         POLYGON_OFFSET.bed,
-        widened(this.uniforms)
+        widened(this.uniforms),
+        'widened'
     );
     /** Rust rails with a silver running strip on top. */
     readonly rails = lambert(
