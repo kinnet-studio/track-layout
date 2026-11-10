@@ -1,36 +1,76 @@
-import { Box3, type BufferGeometry, Group, Mesh, Scene } from 'three';
+import { Box3, type BufferGeometry, Scene } from 'three';
 
 import type { TrackGraph } from '../tracks/track.js';
 import { buildSegmentGeometries, segmentShapeOf } from './geometry.js';
 import { TrackMaterials } from './materials.js';
+import { type BatchHandle, SegmentBatch } from './segment-batch.js';
 
-/** One segment's group, with the box the bounds sum and the geometries to free. */
+export type PartName =
+    | 'ballast'
+    | 'ballastSleepers'
+    | 'slab'
+    | 'slabSleepers'
+    | 'bed'
+    | 'rails'
+    | 'catenary';
+
+/**
+ * The order the batches are created and added to the scene. It is not the
+ * draw order: three sorts opaque meshes by material id and transparent ones by
+ * depth.
+ */
+const PART_NAMES: readonly PartName[] = [
+    'ballast',
+    'ballastSleepers',
+    'slab',
+    'slabSleepers',
+    'bed',
+    'rails',
+    'catenary',
+];
+
+/** @internal Where a segment is drawn: its handle in each batch it uses. */
+export type SegmentParts = Readonly<Partial<Record<PartName, BatchHandle>>>;
+
+/** One segment's handles, and the box the bounds sum. */
 type SegmentEntry = {
-    group: Group;
+    parts: SegmentParts;
     box: Box3;
-    geometries: BufferGeometry[];
 };
 
 /**
- * A three.js `Scene` kept in step with a `TrackGraph`: one `Group` per
- * segment, named `segment:<n>`, added, rebuilt and removed as the graph's
- * segment events fire. Every group and mesh stays at an identity transform;
- * the geometry is already in scene coordinates (x, -y, height).
+ * A three.js `Scene` kept in step with a `TrackGraph`: one `BatchedMesh` per
+ * part, shared by every segment, named `batch:<part>`. A segment is added,
+ * rebuilt and removed in them as the graph's segment events fire. Every mesh
+ * stays at an identity transform; the geometry is already in scene
+ * coordinates (x, -y, height).
  *
- * A segment's surface is drawn by two meshes, `surface` and `sleepers`, over
- * one shared geometry. The materials are shared by every segment and freed
- * only by `dispose`.
+ * A segment's surface is drawn twice, as ballast or slab and again as
+ * sleepers, from one copy of the geometry in each batch. The materials are
+ * shared by every segment and freed only by `dispose`.
  */
 export class TrackScene {
     readonly scene = new Scene();
+    /** @internal TrackView3D reads it. */
     readonly materials = new TrackMaterials();
 
+    private readonly _batches: Record<PartName, SegmentBatch>;
     private readonly _entries = new Map<number, SegmentEntry>();
     private readonly _listeners = new Set<() => void>();
     private readonly _unsubscribes: Array<() => void>;
     private _disposed = false;
 
     constructor(private readonly _graph: TrackGraph) {
+        const batches: Partial<Record<PartName, SegmentBatch>> = {};
+        for (const part of PART_NAMES) {
+            const batch = new SegmentBatch(
+                this.materials[part],
+                `batch:${part}`
+            );
+            batches[part] = batch;
+            this.scene.add(batch.mesh);
+        }
+        this._batches = batches as Record<PartName, SegmentBatch>;
         const manager = _graph.trackCurveManager;
         for (const n of manager.livingEntities) this._build(n);
         this._unsubscribes = [
@@ -43,13 +83,18 @@ export class TrackScene {
         ];
     }
 
+    /** @internal For tests; not part of the API. */
+    batchOf(part: PartName): SegmentBatch {
+        return this._batches[part];
+    }
+
     /**
-     * Segment `segment`'s group, if it has one.
+     * Where segment `segment` is drawn, if it is.
      *
      * @internal For tests; not part of the API, and may change.
      */
-    groupOf(segment: number): Group | undefined {
-        return this._entries.get(segment)?.group;
+    partsOf(segment: number): SegmentParts | undefined {
+        return this._entries.get(segment)?.parts;
     }
 
     /** The layout's extent in scene coordinates; empty for no track. */
@@ -59,7 +104,7 @@ export class TrackScene {
         return box;
     }
 
-    /** Calls `listener` after any group is added, rebuilt or removed. */
+    /** Calls `listener` after any segment is added, rebuilt or removed. */
     onChange(listener: () => void): () => void {
         this._listeners.add(listener);
         return () => {
@@ -71,7 +116,11 @@ export class TrackScene {
         if (this._disposed) return;
         this._disposed = true;
         for (const off of this._unsubscribes) off();
-        for (const entry of this._entries.values()) this._drop(entry);
+        for (const part of PART_NAMES) {
+            const batch = this._batches[part];
+            batch.mesh.removeFromParent();
+            batch.dispose();
+        }
         this._entries.clear();
         this._listeners.clear();
         this.materials.dispose();
@@ -89,7 +138,7 @@ export class TrackScene {
         this._notify();
     }
 
-    /** Replace segment `n`'s group with a fresh one, or just drop it if the segment is gone. */
+    /** Replace segment `n`'s parts with fresh ones, or just drop them if the segment is gone. */
     private _build(n: number): void {
         this._discard(n);
         const segment =
@@ -97,53 +146,38 @@ export class TrackScene {
         if (!segment) return;
         const shape = segmentShapeOf(segment);
         const built = buildSegmentGeometries(shape);
-        const group = new Group();
-        group.name = `segment:${n}`;
-        const sleepers =
-            shape.trackStyle === 'slab'
-                ? this.materials.slabSleepers
-                : this.materials.ballastSleepers;
-        const surfaceMaterial =
-            shape.trackStyle === 'slab'
-                ? this.materials.slab
-                : this.materials.ballast;
-        const parts: Array<[string, BufferGeometry, Mesh['material']]> = [
-            ['surface', built.surface, surfaceMaterial],
-            ['sleepers', built.surface, sleepers],
-            ['rails', built.rails, this.materials.rails],
+        const slab = shape.trackStyle === 'slab';
+        const placements: Array<[PartName, BufferGeometry]> = [
+            [slab ? 'slab' : 'ballast', built.surface],
+            [slab ? 'slabSleepers' : 'ballastSleepers', built.surface],
+            ['rails', built.rails],
         ];
-        if (built.bed) parts.push(['bed', built.bed, this.materials.bed]);
-        if (built.catenary) {
-            parts.push(['catenary', built.catenary, this.materials.catenary]);
+        if (built.bed) placements.push(['bed', built.bed]);
+        if (built.catenary) placements.push(['catenary', built.catenary]);
+        const parts: Partial<Record<PartName, BatchHandle>> = {};
+        for (const [part, geometry] of placements) {
+            parts[part] = this._batches[part].add(geometry);
         }
-        const geometries = new Set<BufferGeometry>();
         const box = new Box3();
-        for (const [name, geometry, material] of parts) {
-            const mesh = new Mesh(geometry, material);
-            mesh.name = name;
-            group.add(mesh);
-            if (!geometries.has(geometry)) {
-                geometries.add(geometry);
-                geometry.computeBoundingBox();
-                if (geometry.boundingBox) box.union(geometry.boundingBox);
-            }
+        // The surface is shared by two parts, so union and free each once.
+        for (const geometry of new Set(placements.map(([, g]) => g))) {
+            geometry.computeBoundingBox();
+            if (geometry.boundingBox) box.union(geometry.boundingBox);
+            geometry.dispose();
         }
-        this.scene.add(group);
-        this._entries.set(n, { group, box, geometries: [...geometries] });
+        this._entries.set(n, { parts, box });
     }
 
-    /** Remove segment `n`'s group and free its geometry; whether there was one. */
+    /** Take segment `n` out of its batches; whether it was in them. */
     private _discard(n: number): boolean {
         const entry = this._entries.get(n);
         if (!entry) return false;
         this._entries.delete(n);
-        this._drop(entry);
+        for (const part of PART_NAMES) {
+            const handle = entry.parts[part];
+            if (handle) this._batches[part].remove(handle);
+        }
         return true;
-    }
-
-    private _drop(entry: SegmentEntry): void {
-        entry.group.removeFromParent();
-        for (const geometry of entry.geometries) geometry.dispose();
     }
 
     private _notify(): void {

@@ -409,22 +409,18 @@ describe('TrackMaterials shaders', () => {
         expect(rails.uniforms.uRunningColor.value.getHex()).toBe(0xd0d0d0);
     });
 
-    it('gives each changed shader its own program cache key', () => {
+    it('shares one program between identical shaders, and gives each different one its own', () => {
         const m = new TrackMaterials();
-        const keys = [
-            m.ballast,
-            m.ballastSleepers,
-            m.slab,
-            m.slabSleepers,
-            m.bed,
-            m.rails,
-        ].map(p => p.customProgramCacheKey());
-        expect(new Set(keys).size).toBe(6);
-        expect(keys).toContain('track-layout:ballastSleepers');
-        expect(keys).toContain('track-layout:slabSleepers');
-        expect(keys).not.toContain(
+        const key = (x: MeshLambertMaterial) => x.customProgramCacheKey();
+        expect(key(m.ballast)).toBe('track-layout:widened');
+        expect(key(m.slab)).toBe('track-layout:widened');
+        expect(key(m.bed)).toBe('track-layout:widened');
+        const others = [m.ballastSleepers, m.slabSleepers, m.rails].map(key);
+        expect(new Set([...others, 'track-layout:widened']).size).toBe(4);
+        expect(others).not.toContain(
             new MeshLambertMaterial().customProgramCacheKey()
         );
+        m.dispose();
     });
 
     it('fails loudly when three’s shader lacks a chunk it extends', () => {

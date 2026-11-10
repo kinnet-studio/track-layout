@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
-import { BufferGeometry, type Group, type Mesh } from 'three';
+import { BatchedMesh, Box3, BufferGeometry } from 'three';
 
-import { TrackScene } from '../src/three/track-scene.js';
+import {
+    MIN_INDEX_CAPACITY,
+    MIN_VERTEX_CAPACITY,
+} from '../src/three/segment-batch.js';
+import { type PartName, TrackScene } from '../src/three/track-scene.js';
 import { TrackGraph } from '../src/tracks/track.js';
 import { layLine } from './track-helpers.js';
 
@@ -21,12 +25,27 @@ function twoSegments(graph: TrackGraph) {
     };
 }
 
-function hasCatenary(group: Group | undefined) {
-    return group?.getObjectByName('catenary') !== undefined;
+const PARTS: PartName[] = [
+    'ballast',
+    'ballastSleepers',
+    'slab',
+    'slabSleepers',
+    'bed',
+    'rails',
+    'catenary',
+];
+
+/** The names of the batches segment `n` is drawn in, sorted. */
+function partsNamed(ts: TrackScene, n: number) {
+    return Object.keys(ts.partsOf(n)!).sort();
 }
 
-function segmentGroups(ts: TrackScene) {
-    return ts.scene.children.filter(c => c.name.startsWith('segment:'));
+/** Segment `n`'s box in `part`'s batch. */
+function boxIn(ts: TrackScene, part: PartName, n: number) {
+    const handle = ts.partsOf(n)![part]!;
+    return ts
+        .batchOf(part)
+        .mesh.getBoundingBoxAt(handle.geometryId, new Box3())!;
 }
 
 /** Counts `BufferGeometry.dispose` calls, until `restore`. */
@@ -50,16 +69,6 @@ function spyOnGeometryDispose() {
     };
 }
 
-/** Every distinct geometry the scene's groups currently hold. */
-function geometriesOf(ts: TrackScene) {
-    const set = new Set<BufferGeometry>();
-    ts.scene.traverse(o => {
-        const g = (o as Mesh).geometry;
-        if (g) set.add(g);
-    });
-    return set;
-}
-
 let graph: TrackGraph;
 let spy: ReturnType<typeof spyOnGeometryDispose> | undefined;
 let infoSpy: ReturnType<typeof spyOn> | undefined;
@@ -80,69 +89,81 @@ describe('TrackScene', () => {
     it('draws segments that existed before it was built', () => {
         const { s1, s2 } = twoSegments(graph);
         const ts = new TrackScene(graph);
-        expect(ts.groupOf(s1)).toBeDefined();
-        expect(ts.groupOf(s2)).toBeDefined();
-        expect(ts.groupOf(s1)!.name).toBe(`segment:${s1}`);
-        expect(ts.groupOf(s1)!.parent).toBe(ts.scene);
+        expect(ts.partsOf(s1)).toBeDefined();
+        expect(ts.partsOf(s2)).toBeDefined();
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(2);
         ts.dispose();
     });
 
-    it('names meshes, shares the materials and keeps identity transforms', () => {
-        const { s1 } = twoSegments(graph);
-        graph.setSegmentStyle(s1, { electrified: true, bed: true });
+    it("holds seven batched meshes, each with its part's shared material, at identity transforms", () => {
+        twoSegments(graph);
         const ts = new TrackScene(graph);
-        const group = ts.groupOf(s1)!;
-        const names = group.children.map(c => c.name).sort();
-        expect(names).toEqual(
-            ['bed', 'catenary', 'rails', 'sleepers', 'surface'].sort()
+        expect(ts.scene.children.map(c => c.name)).toEqual(
+            PARTS.map(part => `batch:${part}`)
         );
-        const surface = group.getObjectByName('surface') as Mesh;
-        const sleepers = group.getObjectByName('sleepers') as Mesh;
-        expect(surface.material).toBe(ts.materials.ballast);
-        expect(sleepers.material).toBe(ts.materials.ballastSleepers);
-        expect(sleepers.geometry).toBe(surface.geometry);
-        expect((group.getObjectByName('rails') as Mesh).material).toBe(
-            ts.materials.rails
-        );
-        group.traverse(o => {
-            expect(o.position.toArray()).toEqual([0, 0, 0]);
-            expect(o.scale.toArray()).toEqual([1, 1, 1]);
-            expect(o.rotation.toArray().slice(0, 3)).toEqual([0, 0, 0]);
+        ts.scene.children.forEach((child, i) => {
+            expect(child).toBeInstanceOf(BatchedMesh);
+            expect((child as BatchedMesh).material).toBe(
+                ts.materials[PARTS[i]!]
+            );
+            expect(child.position.toArray()).toEqual([0, 0, 0]);
+            expect(child.scale.toArray()).toEqual([1, 1, 1]);
+            expect(child.rotation.toArray().slice(0, 3)).toEqual([0, 0, 0]);
         });
         ts.dispose();
     });
 
-    it('uses the slab materials for a slab segment', () => {
+    it('puts a ballasted, electrified, bedded segment in five batches, its surface twice', () => {
         const { s1 } = twoSegments(graph);
-        graph.setSegmentStyle(s1, { trackStyle: 'slab' });
+        graph.setSegmentStyle(s1, { electrified: true, bed: true });
         const ts = new TrackScene(graph);
-        const group = ts.groupOf(s1)!;
-        expect((group.getObjectByName('surface') as Mesh).material).toBe(
-            ts.materials.slab
-        );
-        expect((group.getObjectByName('sleepers') as Mesh).material).toBe(
-            ts.materials.slabSleepers
+        expect(partsNamed(ts, s1)).toEqual([
+            'ballast',
+            'ballastSleepers',
+            'bed',
+            'catenary',
+            'rails',
+        ]);
+        expect(boxIn(ts, 'ballast', s1)).toEqual(
+            boxIn(ts, 'ballastSleepers', s1)
         );
         ts.dispose();
     });
 
-    it('adds, rebuilds and removes groups as the graph changes', () => {
+    it('uses the slab batches for a slab segment', () => {
+        const { s1 } = twoSegments(graph);
+        graph.setSegmentStyle(s1, { trackStyle: 'slab' });
+        const ts = new TrackScene(graph);
+        expect(partsNamed(ts, s1)).toEqual(['rails', 'slab', 'slabSleepers']);
+        ts.dispose();
+    });
+
+    it('moves a segment between batches when its style changes', () => {
+        const { s1 } = twoSegments(graph);
+        const ts = new TrackScene(graph);
+        graph.setSegmentStyle(s1, { trackStyle: 'slab' });
+        expect(partsNamed(ts, s1)).toEqual(['rails', 'slab', 'slabSleepers']);
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(1);
+        expect(ts.batchOf('slab').stats.liveInstances).toBe(1);
+        expect(ts.batchOf('rails').stats.liveInstances).toBe(2);
+        ts.dispose();
+    });
+
+    it('adds, rebuilds and removes segments as the graph changes', () => {
         const { j, s1 } = twoSegments(graph);
         const ts = new TrackScene(graph);
         const s3 = layLine(graph, { x: 0, y: 500 }, { x: 100, y: 500 });
-        expect(ts.groupOf(s3)).toBeDefined();
-        const before = ts.groupOf(s1);
+        expect(ts.partsOf(s3)).toBeDefined();
+        const before = ts.partsOf(s1);
         graph.setJointElevation(j, 6.5);
-        expect(ts.groupOf(s1)).toBeDefined();
-        expect(ts.groupOf(s1)).not.toBe(before);
-        expect(before!.parent).toBeNull();
-        expect(segmentGroups(ts)).toHaveLength(3);
-        expect(hasCatenary(ts.groupOf(s1))).toBe(false);
+        expect(ts.partsOf(s1)).toBeDefined();
+        expect(ts.partsOf(s1)).not.toBe(before);
+        expect(partsNamed(ts, s1)).not.toContain('catenary');
         graph.setSegmentStyle(s1, { electrified: true });
-        expect(hasCatenary(ts.groupOf(s1))).toBe(true);
+        expect(partsNamed(ts, s1)).toContain('catenary');
         graph.removeTrackSegment(s3);
-        expect(ts.groupOf(s3)).toBeUndefined();
-        expect(segmentGroups(ts)).toHaveLength(2);
+        expect(ts.partsOf(s3)).toBeUndefined();
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(2);
         ts.dispose();
     });
 
@@ -150,13 +171,13 @@ describe('TrackScene', () => {
         const { j, s1, s2 } = twoSegments(graph);
         const unrelated = layLine(graph, { x: 0, y: 500 }, { x: 100, y: 500 });
         const ts = new TrackScene(graph);
-        const other = ts.groupOf(unrelated);
-        const s1Before = ts.groupOf(s1);
-        const s2Before = ts.groupOf(s2);
+        const other = ts.partsOf(unrelated);
+        const s1Before = ts.partsOf(s1);
+        const s2Before = ts.partsOf(s2);
         graph.setJointElevation(j, 6.5);
-        expect(ts.groupOf(unrelated)).toBe(other);
-        expect(ts.groupOf(s1)).not.toBe(s1Before);
-        expect(ts.groupOf(s2)).not.toBe(s2Before);
+        expect(ts.partsOf(unrelated)).toBe(other);
+        expect(ts.partsOf(s1)).not.toBe(s1Before);
+        expect(ts.partsOf(s2)).not.toBe(s2Before);
         ts.dispose();
     });
 
@@ -165,8 +186,8 @@ describe('TrackScene', () => {
         const ts = new TrackScene(graph);
         expect(ts.bounds().max.z).toBeLessThan(1);
         graph.setJointElevation(j, 6.5);
-        expect(ts.groupOf(s1)).toBeDefined();
         expect(ts.bounds().max.z).toBeGreaterThan(6);
+        expect(boxIn(ts, 'ballast', s1).max.z).toBeGreaterThan(6);
         ts.dispose();
     });
 
@@ -202,86 +223,122 @@ describe('TrackScene', () => {
         ts.dispose();
     });
 
-    it('disposes what it drops and keeps nothing after a whole layout is removed (Review Focus 1)', () => {
+    it('frees each source geometry once it is copied into its batches', () => {
         twoSegments(graph);
-        layLine(graph, { x: 0, y: 500 }, { x: 100, y: 500 });
         spy = spyOnGeometryDispose();
         const ts = new TrackScene(graph);
-        const built = geometriesOf(ts);
-        expect(built.size).toBeGreaterThan(0);
-        for (const n of [...graph.trackCurveManager.livingEntities]) {
-            graph.removeTrackSegment(n);
+        // two surfaces and two rails
+        expect(spy.count).toBe(4);
+        for (const child of ts.scene.children) {
+            expect(spy.disposed.has((child as BatchedMesh).geometry)).toBe(
+                false
+            );
         }
-        expect(segmentGroups(ts)).toHaveLength(0);
-        expect(spy.count).toBe(built.size);
-        for (const g of built) expect(spy.disposed.has(g)).toBe(true);
-        expect(ts.bounds().isEmpty()).toBe(true);
         ts.dispose();
     });
 
-    it('frees the old geometry when a segment is rebuilt', () => {
-        const { j, s1 } = twoSegments(graph);
+    it('hides a batch once its last segment leaves', () => {
+        const { s1 } = twoSegments(graph);
         const ts = new TrackScene(graph);
-        spy = spyOnGeometryDispose();
-        const old = new Set<BufferGeometry>();
-        ts.groupOf(s1)!.traverse(o => {
-            const g = (o as Mesh).geometry;
-            if (g) old.add(g);
-        });
-        graph.setJointElevation(j, 4);
-        for (const g of old) expect(spy.disposed.has(g)).toBe(true);
-        expect(spy.count).toBeGreaterThanOrEqual(old.size);
+        expect(ts.batchOf('catenary').mesh.visible).toBe(false);
+        graph.setSegmentStyle(s1, { electrified: true });
+        expect(ts.batchOf('catenary').mesh.visible).toBe(true);
+        graph.setSegmentStyle(s1, { electrified: false });
+        expect(ts.batchOf('catenary').mesh.visible).toBe(false);
         ts.dispose();
     });
 
-    it('matches a replaced layout exactly after loadFromSerializedData (Review Focus 1)', async () => {
+    it('keeps a reused geometry id apart from the segment that held it before', () => {
+        const { s1 } = twoSegments(graph);
+        const s3 = layLine(graph, { x: 0, y: 500 }, { x: 100, y: 500 });
+        const ts = new TrackScene(graph);
+        graph.removeTrackSegment(s3);
+        const s4 = layLine(graph, { x: 0, y: 900 }, { x: 100, y: 900 });
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(3);
+        const box = boxIn(ts, 'ballast', s4);
+        expect(box.min.y).toBeLessThan(-899);
+        graph.removeTrackSegment(s1);
+        expect(boxIn(ts, 'ballast', s4)).toEqual(box);
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(2);
+        ts.dispose();
+    });
+
+    it('replacing the layout five times keeps each batch within four times what it holds', async () => {
+        const other = new TrackGraph();
+        for (let i = 0; i < 50; i++) {
+            layLine(other, { x: 0, y: i * 20 }, { x: 60, y: i * 20 });
+        }
+        const data = other.serialize();
+        const ts = new TrackScene(graph);
+        for (let round = 0; round < 5; round++) {
+            await graph.loadFromSerializedData(data, {
+                yieldToFrame: async () => {},
+            });
+            for (const n of graph.trackCurveManager.livingEntities) {
+                expect(ts.partsOf(n)).toBeDefined();
+            }
+            expect(ts.batchOf('ballast').stats.liveInstances).toBe(50);
+            for (const part of PARTS) {
+                const s = ts.batchOf(part).stats;
+                expect(s.vertexCapacity).toBeLessThanOrEqual(
+                    Math.max(4 * s.liveVertices, MIN_VERTEX_CAPACITY)
+                );
+                expect(s.indexCapacity).toBeLessThanOrEqual(
+                    Math.max(4 * s.liveIndices, MIN_INDEX_CAPACITY)
+                );
+            }
+        }
+        ts.dispose();
+    });
+
+    it('matches a replaced layout exactly after loadFromSerializedData', async () => {
         twoSegments(graph);
         layLine(graph, { x: 0, y: 500 }, { x: 100, y: 500 });
         const ts = new TrackScene(graph);
-        const oldGeometries = geometriesOf(ts);
+        const old = [...graph.trackCurveManager.livingEntities];
 
         const other = new TrackGraph();
         layLine(other, { x: 0, y: 0 }, { x: 60, y: 0 });
         layLine(other, { x: 0, y: 300 }, { x: 60, y: 300 });
         layLine(other, { x: 0, y: 600 }, { x: 60, y: 600 });
 
-        spy = spyOnGeometryDispose();
         await graph.loadFromSerializedData(other.serialize(), {
             yieldToFrame: async () => {},
         });
 
         const living = graph.trackCurveManager.livingEntities;
         expect(living).toHaveLength(3);
-        expect(
-            segmentGroups(ts)
-                .map(g => g.name)
-                .sort()
-        ).toEqual(living.map(n => `segment:${n}`).sort());
-        for (const n of living) expect(ts.groupOf(n)).toBeDefined();
-        for (const g of oldGeometries) expect(spy.disposed.has(g)).toBe(true);
-        // nothing of the old layout is still in the scene
-        for (const g of geometriesOf(ts))
-            expect(oldGeometries.has(g)).toBe(false);
+        for (const n of living) expect(ts.partsOf(n)).toBeDefined();
+        for (const n of old) {
+            if (!living.includes(n)) expect(ts.partsOf(n)).toBeUndefined();
+        }
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(3);
         ts.dispose();
     });
 
-    it('dispose() unsubscribes, empties the scene and disposes geometries and materials', () => {
+    it('dispose() unsubscribes, empties the scene and frees the batches and materials', () => {
         twoSegments(graph);
         const ts = new TrackScene(graph);
-        const built = geometriesOf(ts);
         let calls = 0;
         ts.onChange(() => calls++);
-        spy = spyOnGeometryDispose();
+        const geometryDisposed = PARTS.map(part => {
+            let n = 0;
+            ts.batchOf(part).mesh.geometry.addEventListener(
+                'dispose',
+                () => n++
+            );
+            return () => n;
+        });
         let materialDisposed = 0;
         ts.materials.ballast.addEventListener(
             'dispose',
             () => materialDisposed++
         );
         ts.dispose();
-        for (const g of built) expect(spy.disposed.has(g)).toBe(true);
+        for (const count of geometryDisposed) expect(count()).toBe(1);
         expect(materialDisposed).toBe(1);
         expect(ts.scene.children).toHaveLength(0);
-        const before = spy.count;
+        spy = spyOnGeometryDispose();
         layLine(graph, { x: 0, y: 500 }, { x: 100, y: 500 });
         for (const n of graph.trackCurveManager.livingEntities) {
             graph.setSegmentStyle(n, { electrified: true });
@@ -289,10 +346,10 @@ describe('TrackScene', () => {
         }
         expect(calls).toBe(0);
         expect(ts.scene.children).toHaveLength(0);
-        expect(spy.count).toBe(before);
+        expect(spy.count).toBe(0);
     });
 
-    it('builds a scene of 3000 segments in under 3 s', () => {
+    it('builds 3000 segments in under 3 s, in seven objects, and rebuilds one without touching the rest', () => {
         for (let i = 0; i < 3000; i++) {
             const col = i % 60;
             const row = Math.floor(i / 60);
@@ -302,12 +359,26 @@ describe('TrackScene', () => {
                 { x: col * 30 + 10, y: row * 30 }
             );
         }
-        expect(graph.trackCurveManager.livingEntities).toHaveLength(3000);
+        const living = [...graph.trackCurveManager.livingEntities];
+        expect(living).toHaveLength(3000);
         const t1 = performance.now();
         const ts = new TrackScene(graph);
         const ms = performance.now() - t1;
-        expect(segmentGroups(ts)).toHaveLength(3000);
         expect(ms).toBeLessThan(3000);
+        expect(ts.scene.children).toHaveLength(7);
+        expect(ts.batchOf('ballast').stats.liveInstances).toBe(3000);
+        const recorded = new Map(living.map(n => [n, ts.partsOf(n)]));
+        const target = living[1234]!;
+        const joint =
+            graph.trackCurveManager.getTrackSegmentWithJoints(target)!.t0Joint;
+        graph.setJointElevation(joint, 3);
+        let changed = 0;
+        for (const n of living) {
+            if (ts.partsOf(n) !== recorded.get(n)) changed++;
+            else expect(ts.partsOf(n)).toBe(recorded.get(n));
+        }
+        expect(ts.partsOf(target)).not.toBe(recorded.get(target));
+        expect(changed).toBe(1);
         ts.dispose();
     }, 60000);
 });
