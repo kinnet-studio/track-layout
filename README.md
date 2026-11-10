@@ -388,14 +388,16 @@ new TrackAlignedPlatformRenderSystem(
 `track-layout/three` draws the track graph with three.js. It needs the
 optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
 
-- **`TrackScene`.** `new TrackScene(graph)` builds a three.js `Scene` with
-  one group per segment, including the segments the graph already holds.
-  It keeps the groups in step with the graph's add, remove, style and
-  height events, and frees the old geometry when it rebuilds one.
+- **`TrackScene`.** `new TrackScene(graph)` builds a three.js `Scene` that
+  draws the laid track from one batched mesh per part (ballast, slab,
+  sleepers, bed, rails and catenary), however many segments there are, so a
+  frame's cost doesn't grow with the layout. It keeps them in step with the
+  graph's add, remove, style and height events, replacing only the segments
+  that changed.
     - `bounds()` gives the layout's extent in scene coordinates.
-    - `onChange(listener)` calls back after any group is added, rebuilt or
+    - `onChange(listener)` calls back after any segment is added, rebuilt or
       removed, and returns a function that stops it.
-    - `dispose()` stops listening and frees the geometry and materials.
+    - `dispose()` stops listening and frees the batches and materials.
 - **`TrackView3D`.** `new TrackView3D(canvas, trackScene, options)` draws a
   `TrackScene` on a canvas, on demand: only after the scene, the camera or
   the size changes. It adds its lights and the orbit ground to the scene and
