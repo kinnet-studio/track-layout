@@ -126,6 +126,20 @@ describe('SegmentBatch', () => {
         batch.dispose();
     });
 
+    it('ignores a handle it has already removed, even after its ids are reused', () => {
+        const batch = new SegmentBatch(material, 'test');
+        const a = batch.add(plane(2, 2, 1));
+        batch.remove(a);
+        const sourceB = plane(3, 3, 2);
+        const b = batch.add(sourceB);
+        expect(b.geometryId).toBe(a.geometryId);
+        batch.remove(a);
+        expect(batch.stats.liveInstances).toBe(1);
+        expect(batch.mesh.visible).toBe(true);
+        expectBox(batch, b, sourceB);
+        batch.dispose();
+    });
+
     it("dispose frees the batch's geometry once", () => {
         const batch = new SegmentBatch(material, 'test');
         batch.add(plane(1, 1));

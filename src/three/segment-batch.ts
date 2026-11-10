@@ -30,10 +30,11 @@ export class SegmentBatch {
     private indexCapacity: number;
     private liveVertices = 0;
     private liveIndices = 0;
-    // Sizes by geometry id, so `remove` can take them off the live counts.
-    private readonly sizes = new Map<
+    // Live entries by geometry id: the handle `add` returned and its sizes.
+    // Three reuses ids, so only the handle object tells a stale one apart.
+    private readonly live = new Map<
         number,
-        { vertices: number; indices: number }
+        { handle: BatchHandle; vertices: number; indices: number }
     >();
     private disposed = false;
 
@@ -71,19 +72,21 @@ export class SegmentBatch {
         this.makeRoom(vertices, indices);
         const geometryId = this.mesh.addGeometry(geometry);
         const instanceId = this.mesh.addInstance(geometryId);
-        this.sizes.set(geometryId, { vertices, indices });
+        const handle = { geometryId, instanceId };
+        this.live.set(geometryId, { handle, vertices, indices });
         this.liveVertices += vertices;
         this.liveIndices += indices;
         this.mesh.visible = true;
-        return { geometryId, instanceId };
+        return handle;
     }
 
+    /** Removing a handle that was already removed does nothing, even after its ids are reused. */
     remove(handle: BatchHandle): void {
-        const size = this.sizes.get(handle.geometryId);
-        if (size === undefined) return;
+        const size = this.live.get(handle.geometryId);
+        if (size === undefined || size.handle !== handle) return;
         // Deleting a geometry deletes its instance too.
         this.mesh.deleteGeometry(handle.geometryId);
-        this.sizes.delete(handle.geometryId);
+        this.live.delete(handle.geometryId);
         this.liveVertices -= size.vertices;
         this.liveIndices -= size.indices;
         this.mesh.visible = this.mesh.instanceCount > 0;
