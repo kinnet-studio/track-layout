@@ -390,10 +390,10 @@ optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
 
 - **`TrackScene`.** `new TrackScene(graph)` builds a three.js `Scene` that
   draws the laid track from one batched mesh per part (ballast, slab,
-  sleepers, bed, rails and catenary), however many segments there are, so a
-  frame's cost doesn't grow with the layout. It keeps them in step with the
-  graph's add, remove, style and height events, replacing only the segments
-  that changed.
+  sleepers, bed, rails and catenary), however many segments there are, so
+  three.js handles seven objects a frame whatever the layout's size. It keeps
+  them in step with the graph's add, remove, style and height events,
+  replacing only the segments that changed.
     - `bounds()` gives the layout's extent in scene coordinates.
     - `onChange(listener)` calls back after any segment is added, rebuilt or
       removed, and returns a function that stops it.

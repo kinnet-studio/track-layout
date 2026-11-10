@@ -14,7 +14,11 @@ export type PartName =
     | 'rails'
     | 'catenary';
 
-/** Draw order; also the order of the meshes in the scene. */
+/**
+ * The order the batches are created and added to the scene. It is not the
+ * draw order: three sorts opaque meshes by material id and transparent ones by
+ * depth.
+ */
 const PART_NAMES: readonly PartName[] = [
     'ballast',
     'ballastSleepers',
@@ -79,7 +83,7 @@ export class TrackScene {
         ];
     }
 
-    /** @internal For tests and TrackView3D; not part of the API. */
+    /** @internal For tests; not part of the API. */
     batchOf(part: PartName): SegmentBatch {
         return this._batches[part];
     }

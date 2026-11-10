@@ -57,7 +57,8 @@ export class SegmentBatch {
             material
         );
         this.mesh.perObjectFrustumCulled = true;
-        // Track is opaque, so sorting would only cost time.
+        // The surfaces are opaque, and the sleeper decals are one colour, so
+        // their order doesn't show. Sorting would only cost time.
         this.mesh.sortObjects = false;
         // The mesh's own bounds are stale after edits; cull per instance.
         this.mesh.frustumCulled = false;
@@ -71,6 +72,10 @@ export class SegmentBatch {
         const indices = geometry.getIndex()!.count;
         this.makeRoom(vertices, indices);
         const geometryId = this.mesh.addGeometry(geometry);
+        // Instances stay at the identity transform, so never call setMatrixAt.
+        // The widening in materials.ts measures depth from modelViewMatrix alone,
+        // which skips BatchedMesh's per-instance batchingMatrix. A moved instance
+        // would be widened wrong, with no error.
         const instanceId = this.mesh.addInstance(geometryId);
         const handle = { geometryId, instanceId };
         this.live.set(geometryId, { handle, vertices, indices });
