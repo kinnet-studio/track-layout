@@ -1,5 +1,5 @@
 {
-    "name": "track-layout",
+    "name": "@kinnet-studio/track-layout",
     "version": "0.15.1",
     "description": "Railway track layout model: a Bezier track graph with junctions and elevation, stations and platforms, and save/load.",
     "license": "MIT",
@@ -42,6 +42,9 @@
     "files": [
         "dist"
     ],
+    "publishConfig": {
+        "access": "public"
+    },
     "scripts": {
         "build": "rm -rf dist && tsc -p tsconfig.build.json",
         "typecheck": "tsc --noEmit -p tsconfig.json",

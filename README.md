@@ -1,4 +1,4 @@
-# track-layout
+# @kinnet-studio/track-layout
 
 Railway track layout model for freeform, real-scale Bezier track: a track
 graph with junctions and elevation, stations and platforms, and save/load.
@@ -8,16 +8,22 @@ Built on the [@ue-too](https://github.com/kinnet-studio/ue-too) packages,
 which are peer dependencies.
 
 > Status: 0.x. APIs may change between minor versions.
+>
+> Up to 0.15.1 this package was published as
+> [`track-layout`](https://www.npmjs.com/package/track-layout). Later versions
+> are only published as `@kinnet-studio/track-layout`; change the dependency
+> and the import paths to move over.
 
 ## Install
 
 ```bash
-bun add track-layout @ue-too/board @ue-too/curve @ue-too/math
+bun add @kinnet-studio/track-layout @ue-too/board @ue-too/curve @ue-too/math
 ```
 
-For the 3D view in `track-layout/three`, also add the optional peer `three`
-(`^0.186.1`). TypeScript users also add `@types/three@0.186.0`, because the
-published type declarations import three's types:
+For the 3D view in `@kinnet-studio/track-layout/three`, also add the
+optional peer `three` (`^0.186.1`). TypeScript users also add
+`@types/three@0.186.0`, because the published type declarations import
+three's types:
 
 ```bash
 bun add three@^0.186.1
@@ -27,7 +33,7 @@ bun add -d @types/three@0.186.0 # TypeScript only
 ## Example
 
 ```ts
-import { TrackGraph } from 'track-layout';
+import { TrackGraph } from '@kinnet-studio/track-layout';
 
 const graph = new TrackGraph();
 const east = { x: 1, y: 0 };
@@ -59,7 +65,10 @@ third argument, and the example above lays flat track at 0 m.
   field, so pass the inner array.
 
     ```ts
-    import { StationManager, levelsToMetres } from 'track-layout';
+    import {
+        StationManager,
+        levelsToMetres,
+    } from '@kinnet-studio/track-layout';
 
     // `old` holds what graph.serialize() and stationManager.serialize()
     // wrote, in levels.
@@ -134,16 +143,16 @@ graph.onSegmentElevationChanged(n => console.log('redraw', n));
 
 ## Laying and editing track
 
-`track-layout/editing` holds the laying engine and the editing tools as
-state machines: layout, joint direction, duplicate to side and catenary.
-They need the optional peer `@ue-too/being`.
+`@kinnet-studio/track-layout/editing` holds the laying engine and the
+editing tools as state machines: layout, joint direction, duplicate to side
+and catenary. They need the optional peer `@ue-too/being`.
 
 ```ts
-import { TrackGraph } from 'track-layout';
+import { TrackGraph } from '@kinnet-studio/track-layout';
 import {
     CurveCreationEngine,
     createLayoutStateMachine,
-} from 'track-layout/editing';
+} from '@kinnet-studio/track-layout/editing';
 
 const graph = new TrackGraph();
 // Replace with your camera's window-to-world conversion.
@@ -184,9 +193,10 @@ const gradient = engine.previewGradient; // e.g. 2.5 for a 2.5% climb
 
 ## Placing stations
 
-`track-layout/station-placement` holds the station placement tools as
-state machines: island stations, single-spine platforms and dual-spine
-platform pairs. Like the editing tools, they need `@ue-too/being`.
+`@kinnet-studio/track-layout/station-placement` holds the station
+placement tools as state machines: island stations, single-spine platforms
+and dual-spine platform pairs. Like the editing tools, they need
+`@ue-too/being`.
 
 - **Previews.** Each engine draws its preview through an interface you
   implement with your renderer: `StationPlacementPreview`,
@@ -206,12 +216,12 @@ import {
     StationManager,
     TrackAlignedPlatformManager,
     TrackGraph,
-} from 'track-layout';
+} from '@kinnet-studio/track-layout';
 import {
     SingleSpinePlacementEngine,
     type SingleSpinePlacementPreview,
     createSingleSpinePlacementStateMachine,
-} from 'track-layout/station-placement';
+} from '@kinnet-studio/track-layout/station-placement';
 
 const graph = new TrackGraph();
 const stations = new StationManager();
@@ -251,7 +261,7 @@ tool.happens('startPlacement', { stationId });
 
 ## Drawing a layout with Pixi
 
-`track-layout/pixi` holds Pixi 8 renderers for track, stations,
+`@kinnet-studio/track-layout/pixi` holds Pixi 8 renderers for track, stations,
 track-aligned platforms and joint-direction indicators. It needs the
 optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
 
@@ -286,7 +296,8 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
       flat at height 0, so track below ground level is drawn in a tunnel
       (given a `textureRenderer`).
     - `curveCreation`, `duplicateToSide` and `catenaryLayout`: the engines
-      from `track-layout/editing`, whose previews and highlights it draws.
+      from `@kinnet-studio/track-layout/editing`, whose previews and
+      highlights it draws.
 - **Stations and platforms.** `StationRenderSystem` and
   `TrackAlignedPlatformRenderSystem` draw the stations and platforms their
   managers already hold when they are built, then draw and remove them as
@@ -341,20 +352,20 @@ optional peer `pixi.js`, 8.20.1 or a later 8.x, but not `@ue-too/being`.
   if one is showing.
 
 ```ts
-import { DefaultBoardCamera } from '@ue-too/board';
-import { Application } from 'pixi.js';
 import {
     StationManager,
     TrackAlignedPlatformManager,
     TrackGraph,
-} from 'track-layout';
-import { CurveCreationEngine } from 'track-layout/editing';
+} from '@kinnet-studio/track-layout';
+import { CurveCreationEngine } from '@kinnet-studio/track-layout/editing';
 import {
     StationRenderSystem,
     TrackAlignedPlatformRenderSystem,
     TrackRenderSystem,
     WorldRenderSystem,
-} from 'track-layout/pixi';
+} from '@kinnet-studio/track-layout/pixi';
+import { DefaultBoardCamera } from '@ue-too/board';
+import { Application } from 'pixi.js';
 
 const app = new Application();
 await app.init();
@@ -385,8 +396,8 @@ new TrackAlignedPlatformRenderSystem(
 
 ## Drawing a layout in 3D with three.js
 
-`track-layout/three` draws the track graph with three.js. It needs the
-optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
+`@kinnet-studio/track-layout/three` draws the track graph with three.js. It
+needs the optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
 
 - **`TrackScene`.** `new TrackScene(graph)` builds a three.js `Scene` that
   draws the laid track from one batched mesh per part (ballast, slab,
@@ -446,11 +457,14 @@ optional peer `three`, `^0.186.1`, and imports nothing from Pixi.
   and an ambient light. There are no shadows.
 
 ```ts
+import { TrackGraph } from '@kinnet-studio/track-layout';
+import {
+    TrackRenderSystem,
+    WorldRenderSystem,
+} from '@kinnet-studio/track-layout/pixi';
+import { TrackScene, TrackView3D } from '@kinnet-studio/track-layout/three';
 import { DefaultBoardCamera } from '@ue-too/board';
 import { Application } from 'pixi.js';
-import { TrackGraph } from 'track-layout';
-import { TrackRenderSystem, WorldRenderSystem } from 'track-layout/pixi';
-import { TrackScene, TrackView3D } from 'track-layout/three';
 
 const app = new Application();
 await app.init({ backgroundAlpha: 0 }); // a see-through Pixi canvas

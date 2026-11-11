@@ -739,8 +739,9 @@ export class TrackRenderSystem {
      * tunnels and cuttings, the zoomed-out line and the dashed underground
      * line, and the line styles' lines with their bridges and portals.
      * Previews, highlights and the projection dots still show. It is for a
-     * 3D view, such as `TrackView3D` from `track-layout/three`, that draws
-     * the laid track instead, under a see-through Pixi canvas. Changing it
+     * 3D view, such as `TrackView3D` from
+     * `@kinnet-studio/track-layout/three`, that draws the laid track
+     * instead, under a see-through Pixi canvas. Changing it
      * only shows or hides what is drawn, so it is instant; track laid or
      * changed while it is false is drawn hidden, and shows when it is true
      * again.
