@@ -21,7 +21,7 @@ type Subscribe<T> = (
 
 /**
  * The previews the track renderer draws for the curve tool. The
- * `CurveCreationEngine` from `track-layout/editing` is one.
+ * `CurveCreationEngine` from `@kinnet-studio/track-layout/editing` is one.
  */
 export interface CurveCreationPreviewSource {
     onPreviewDrawDataChange: Subscribe<PreviewDrawData | undefined>;
@@ -32,7 +32,7 @@ export interface CurveCreationPreviewSource {
 
 /**
  * The previews the track renderer draws for the duplicate-to-side tool. The
- * `DuplicateToSideEngine` from `track-layout/editing` is one.
+ * `DuplicateToSideEngine` from `@kinnet-studio/track-layout/editing` is one.
  */
 export interface DuplicateToSidePreviewSource {
     onPreviewDrawDataChange: Subscribe<PreviewDrawData | undefined>;
@@ -41,7 +41,7 @@ export interface DuplicateToSidePreviewSource {
 
 /**
  * The previews the track renderer draws for the catenary tool. The
- * `CatenaryLayoutEngine` from `track-layout/editing` is one.
+ * `CatenaryLayoutEngine` from `@kinnet-studio/track-layout/editing` is one.
  */
 export interface CatenaryLayoutPreviewSource {
     onHighlightChange: Subscribe<CatenaryHighlightState>;
